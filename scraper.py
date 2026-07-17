@@ -12,7 +12,7 @@ from lxml import etree
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 log = logging.getLogger("fwn")
 
-DB_PATH = os.environ.get("DB_PATH", "novels.db")
+DB_PATH = os.environ.get("DB_PATH", "/app/data/novels.db")
 RUN_INTERVAL_HOURS = int(os.environ.get("RUN_INTERVAL_HOURS", "6"))
 DELAY_BETWEEN_REQUESTS = float(os.environ.get("DELAY_BETWEEN_REQUESTS", "10"))
 SERVER_PORT = int(os.environ.get("SERVER_PORT", "9310"))
@@ -462,7 +462,7 @@ def dashboard_html():
       <td style="color:#0f0">{bar} {bar_pct:.0f}%</td>
       <td style="font-size:12px;color:#888">{latest[:40]}</td>
       <td style="font-size:12px;color:#888">{last_str}</td>
-      <td style="white-space:nowrap">
+      <td class="action-col" style="white-space:nowrap">
         <a href="/api/scrape/{html.escape(n_url)}" title="Scrape" style="color:#3fb950;text-decoration:none;padding:2px 4px;font-size:16px;display:inline-block;border:1px solid transparent;border-radius:4px">▶</a>
         <button onclick="editNovel('{slug}', '{safe_title}', '{html.escape(n_author)}', '{html.escape(n_url)}')" title="Edit" style="color:#ffa657;text-decoration:none;padding:2px 4px;font-size:16px;cursor:pointer;background:none;border:1px solid transparent;border-radius:4px">✎</button>
         <button onclick="deleteNovel('{slug}', '{safe_title}')" title="Delete" style="color:#f85149;text-decoration:none;padding:2px 4px;font-size:16px;cursor:pointer;background:none;border:1px solid transparent;border-radius:4px">✕</button>
@@ -544,9 +544,11 @@ body{{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0e17;color:#c9d1
 .stat-card .label{{font-size:12px;color:#8b949e;text-transform:uppercase;letter-spacing:1px}}
 .stat-card .value{{font-size:32px;font-weight:700;color:#f0f6fc;margin-top:8px}}
 .stat-card .value.green{{color:#3fb950}}
-table{{width:100%;border-collapse:collapse;background:#161b22;border-radius:8px;overflow:hidden}}
+table{{border-collapse:collapse;background:#161b22;border-radius:8px;overflow:hidden}}
+.table-wrap{{overflow-x:auto}}
 th{{background:#0d1117;padding:12px 16px;text-align:left;font-size:12px;color:#8b949e;text-transform:uppercase;letter-spacing:1px}}
 td{{padding:12px 16px;border-top:1px solid #21262d}}
+td.action-col{{min-width:100px;max-width:140px;white-space:nowrap;padding:12px 16px}}
 tr:hover{{background:#1c2129}}
 </style></head><body>
 <div class="header"><h1>FreeWebNovel Scraper</h1><p>Dashboard &amp; management console</p></div>
@@ -559,10 +561,12 @@ tr:hover{{background:#1c2129}}
 </div>
 {indicator}
 <div style="margin-bottom:16px">{scrape_all}</div>
+<div class="table-wrap">
 <table>
   <thead><tr><th>Novel</th><th>Author</th><th>Chapters</th><th>Progress</th><th>Latest</th><th>Last Scraped</th><th>Action</th></tr></thead>
   <tbody>{rows}</tbody>
 </table>
+</div>
 <div style="margin-top:32px">
   <div id="addForm" style="padding:20px;background:#161b22;border:1px solid #21262d;border-radius:8px">
     <h3 style="color:#f0f6fc;margin-bottom:12px">Add Novel</h3>
