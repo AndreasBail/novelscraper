@@ -534,7 +534,11 @@ def main():
                         await scrape_novel(u)
                     log.info("Waiting %d hours until next run...", RUN_INTERVAL_HOURS)
                     await asyncio.sleep(RUN_INTERVAL_HOURS * 3600)
-            asyncio.create_task(_run())
+            def _run_thread():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(_run())
+            threading.Thread(target=_run_thread, daemon=True).start()
             log.info("Background scraper started for %d sources", len(urls))
         log.info("Serving dashboard on 0.0.0.0:%d", SERVER_PORT)
         uvicorn.run(app, host="0.0.0.0", port=SERVER_PORT)
