@@ -38,12 +38,17 @@ td a:hover{text-decoration:underline}
 .progress-pct.low{color:#8b949e}
 
 /* Actions */
-.actions{display:flex;gap:4px;justify-content:center}
-.actions button{background:none;border:none;cursor:pointer;font-size:16px;padding:4px 6px;border-radius:4px;transition:opacity 0.2s}
-.actions button:hover{opacity:0.7}
-.actions .scrape{color:#3fb950}
-.actions .edit{color:#ffa657}
-.actions .delete{color:#f85149}
+.actions{position:relative;display:inline-block}
+.chevron-btn{background:none;border:none;cursor:pointer;font-size:18px;padding:4px 8px;border-radius:4px;transition:opacity 0.2s;color:#8b949e}
+.chevron-btn:hover{opacity:0.7;background:#21262d}
+.chevron-btn.open{background:#21262d}
+.dropdown-menu{display:none;position:absolute;right:0;top:100%;min-width:160px;background:#161b22;border:1px solid #30363d;border-radius:6px;padding:4px 0;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,0.4)}
+.dropdown-menu.show{display:block}
+.dropdown-menu button{display:block;width:100%;text-align:left;background:none;border:none;padding:8px 16px;font-size:13px;color:#c9d1d9;cursor:pointer;font-family:inherit}
+.dropdown-menu button:hover{background:#1c2129}
+.dropdown-menu button.menu-scrape{color:#3fb950}
+.dropdown-menu button.menu-edit{color:#ffa657}
+.dropdown-menu button.menu-delete{color:#f85149}
 
 /* Empty state */
 .empty-msg{text-align:center;padding:24px;color:#8b949e;font-size:13px}

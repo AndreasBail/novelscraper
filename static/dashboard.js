@@ -54,9 +54,12 @@ function _renderNovels(novels) {
       + '<td style="font-size:12px;color:#888">' + (n.latest || '') + '</td>'
       + '<td style="font-size:12px;color:#888">' + (n.last_scraped || 'Never') + '</td>'
       + '<td><div class="actions">'
-        + '<button class="scrape" onclick="scrapeSingle(\'' + n.url.replace(/'/g,"\\'") + '\')" title="Scrape">&#9654;</button>'
-        + '<button class="edit" onclick="openEdit(\'' + slug + '\',\'' + title.replace(/'/g,"\\'") + '\',\'' + author.replace(/'/g,"\\'") + '\',\'' + n.url.replace(/'/g,"\\'") + '\')" title="Edit">&#10098;</button>'
-        + '<button class="delete" onclick="deleteNovel(\'' + slug + '\',\'' + title.replace(/'/g,"\\'") + '\')" title="Delete">&#10005;</button>'
+        + '<button class="chevron-btn" onclick="toggleMenu(this)" title="Actions">⋮</button>'
+        + '<div class="dropdown-menu">'
+          + '<button class="menu-scrape" onclick="scrapeSingle(\'' + n.url.replace(/'/g,"\\'") + '\');closeAllMenus()">▶ Scrape</button>'
+          + '<button class="menu-edit" onclick="openEdit(\'' + slug + '\',\'' + title.replace(/'/g,"\\'") + '\',\'' + author.replace(/'/g,"\\'") + '\',\'' + n.url.replace(/'/g,"\\'") + '\');closeAllMenus()">✎ Edit</button>'
+          + '<button class="menu-delete" onclick="deleteNovel(\'' + slug + '\',\'' + title.replace(/'/g,"\\'") + '\');closeAllMenus()">✕ Delete</button>'
+        + '</div>'
       + '</div></td>'
     + '</tr>';
   }
@@ -149,7 +152,25 @@ function closeModal() {
   document.getElementById('modal').className = '';
 }
 
-document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeModal(); });
+document.addEventListener('keydown', function(e){
+  if(e.key==='Escape') { closeModal(); closeAllMenus(); }
+});
+
+document.addEventListener('click', function(e){
+  if(!e.target.closest('.actions')) closeAllMenus();
+});
+
+function toggleMenu(btn) {
+  var menu = btn.nextElementSibling;
+  var wasOpen = menu.classList.contains('show');
+  closeAllMenus();
+  if(!wasOpen) { menu.classList.add('show'); btn.classList.add('open'); }
+}
+
+function closeAllMenus() {
+  document.querySelectorAll('.dropdown-menu.show').forEach(function(m){ m.classList.remove('show'); });
+  document.querySelectorAll('.chevron-btn.open').forEach(function(b){ b.classList.remove('open'); });
+}
 
 document.addEventListener('DOMContentLoaded', function() {
   loadNovels();
