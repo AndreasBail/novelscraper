@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import httpx
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse, HTMLResponse
 from lxml import etree
 
@@ -289,15 +289,25 @@ async def api_remove_source(path):
     return {"ok": True, "removed": url}
 
 @app.post("/api/sources/add")
-async def api_add_source(body: dict = None, url: str = None):
+async def api_add_source(request: Request):
     """Add a novel URL to sources and start scraping."""
-    # Support both JSON body and query param
-    from fastapi import Request
-    # Try to read body if content-type is json
+    # Try to read body (JSON or form)
+    data = None
     try:
-        url = body.get("url", "") if body else ""
+        ct = request.headers.get("content-type", "")
+        if "application/json" in ct:
+            raw = await request.json()
+            if isinstance(raw, dict):
+                data = raw
+        elif "application/x-www-form-urlencoded" in ct:
+            fd = await request.form()
+            data = dict(fd)
     except Exception:
         pass
+    # Fall back to query param (e.g. fetch('/api/sources/add?url=...') — no body sent)
+    url = request.query_params.get("url", "")
+    if not url:
+        url = (data or {}).get("url", "")
     if not url:
         raise HTTPException(400, "URL required")
     url = url.strip()
@@ -391,7 +401,7 @@ async def rss(slug):
         n.title as novel_title, n.author as novel_author
         FROM chapters c JOIN novels n ON c.novel_url=n.url
         WHERE c.novel_url=? ORDER BY c.scraped_at DESC""", (novel_url,)).fetchall()
-    rows.sort(key=lambda r: extract_chapter_num(r[1]))
+    rows.sort(key=lambda r: r[3])  # sort by scraped_at (pubDate timestamp) ascending, oldest first
     if not rows:
         raise HTTPException(status_code=404, detail="No chapters found")
     info = db.execute("SELECT title,author FROM novels WHERE url=?", (novel_url,)).fetchone()
@@ -428,9 +438,7 @@ async def rss_all():
         n.title as novel_title, n.author as novel_author
         FROM chapters c JOIN novels n ON c.novel_url=n.url
         ORDER BY c.scraped_at DESC LIMIT 200""").fetchall()
-    rows.sort(key=lambda r: extract_chapter_num(r[1]))
-    if not rows:
-        raise HTTPException(status_code=404, detail="No chapters found")
+    # already ordered by scraped_at DESC from query — keep newest first for all.xml feed
     items = ""
     for r in rows:
         chap_url, chap_title, content, scraped_at, novel_title, novel_author = r
@@ -477,24 +485,24 @@ def dashboard_html():
             bar_pct = wc / n_count * 100
             lt = db.execute("SELECT chapter_title FROM chapters WHERE novel_url=? ORDER BY scraped_at DESC LIMIT 1", (n_url,)).fetchone()
             latest = lt[0] if lt else ""
-        bar = chr(9608) * int(bar_pct / 2) + chr(9617) * (50 - int(bar_pct / 2)) if n_count else ""
         last_str = "Never"
         if n_last:
             last_str = datetime.fromtimestamp(n_last, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
-        safe_url = n_url.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
-        safe_title = html.escape(n_title)
         slug = n_url.rstrip("/").split("/")[-1]
+        safe_title = html.escape(n_title)
+        bar_div = f'<div style="height:100%;width:{bar_pct}%;background:linear-gradient(90deg,#238636,#3fb950);border-radius:3px"></div>' if bar_pct > 0 else ''
+        bar_html = f'<div style="display:flex;align-items:center;gap:10px"><div style="flex:1;height:8px;background:#21262d;border-radius:4px;overflow:hidden">{bar_div}</div><span style="font-size:12px;color:{"#3fb950" if bar_pct==100 else "#8b949e"};min-width:36px;text-align:right">{bar_pct:.0f}%</span></div>'
         rows += f"""    <tr>
       <td><a href="/rss/{slug}" style="color:#4fc3f7">{safe_title}</a></td>
       <td style="color:#aaa">{html.escape(n_author)}</td>
       <td>{n_count}</td>
-      <td style="color:#0f0">{bar} {bar_pct:.0f}%</td>
+      <td>{bar_html}</td>
       <td style="font-size:12px;color:#888">{latest[:40]}</td>
       <td style="font-size:12px;color:#888">{last_str}</td>
-      <td class="action-col" style="white-space:nowrap">
-        <a href="/api/scrape/{html.escape(n_url)}" title="Scrape" style="color:#3fb950;text-decoration:none;padding:2px 4px;font-size:16px;display:inline-block;border:1px solid transparent;border-radius:4px">▶</a>
-        <button onclick="editNovel('{slug}', '{safe_title}', '{html.escape(n_author)}', '{html.escape(n_url)}')" title="Edit" style="color:#ffa657;text-decoration:none;padding:2px 4px;font-size:16px;cursor:pointer;background:none;border:1px solid transparent;border-radius:4px">✎</button>
-        <button onclick="deleteNovel('{slug}', '{safe_title}')" title="Delete" style="color:#f85149;text-decoration:none;padding:2px 4px;font-size:16px;cursor:pointer;background:none;border:1px solid transparent;border-radius:4px">✕</button>
+      <td style="text-align:center">
+        <a href="/api/scrape/{html.escape(n_url)}" title="Scrape" style="color:#3fb950;text-decoration:none;padding:2px 6px;font-size:16px;display:inline-block">▶</a>
+        <button onclick="editNovel('{slug}', '{safe_title}', '{html.escape(n_author)}', '{html.escape(n_url)}')" title="Edit" style="color:#ffa657;text-decoration:none;padding:2px 6px;font-size:16px;cursor:pointer;background:none;border:none">✎</button>
+        <button onclick="deleteNovel('{slug}', '{safe_title}')" title="Delete" style="color:#f85149;text-decoration:none;padding:2px 6px;font-size:16px;cursor:pointer;background:none;border:none">✕</button>
       </td>
     </tr>"""
 
