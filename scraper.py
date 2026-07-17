@@ -525,6 +525,17 @@ def main():
                 await asyncio.sleep(RUN_INTERVAL_HOURS * 3600)
         asyncio.run(_run())
     elif cmd == "serve":
+        sources = Path("sources.txt")
+        urls = [l.strip() for l in sources.read_text().splitlines() if l.strip()] if sources.exists() else []
+        if urls:
+            async def _run():
+                while True:
+                    for u in urls:
+                        await scrape_novel(u)
+                    log.info("Waiting %d hours until next run...", RUN_INTERVAL_HOURS)
+                    await asyncio.sleep(RUN_INTERVAL_HOURS * 3600)
+            asyncio.create_task(_run())
+            log.info("Background scraper started for %d sources", len(urls))
         log.info("Serving dashboard on 0.0.0.0:%d", SERVER_PORT)
         uvicorn.run(app, host="0.0.0.0", port=SERVER_PORT)
     else:
