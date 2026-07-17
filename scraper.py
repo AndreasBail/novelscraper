@@ -223,6 +223,8 @@ async def scrape_novel(novel_url):
     db.commit()
     _scraping_progress["percent"] = 100
     _scraping_progress["message"] = f"Complete \\u2014 {len(new_chaps)} new chapters"
+    _scraping_novel = None
+    _scraping_progress = {"message": "", "percent": 0, "total": 0, "scraped": 0}
     return True, f"Scraped {len(new_chaps)} new chapters"
 
 # ---- API ----
@@ -285,29 +287,23 @@ async def api_remove_source(path):
     if sources.exists():
         lines = [l for l in sources.read_text().splitlines() if l.strip() != url]
         sources.write_text("\n".join(lines) + "\n")
-    _scraping_abort.set()
     return {"ok": True, "removed": url}
 
 @app.post("/api/sources/add")
 async def api_add_source(request: Request):
-    """Add a novel URL to sources and start scraping."""
-    # Try to read body (JSON or form)
-    data = None
-    try:
-        ct = request.headers.get("content-type", "")
-        if "application/json" in ct:
-            raw = await request.json()
-            if isinstance(raw, dict):
-                data = raw
-        elif "application/x-www-form-urlencoded" in ct:
-            fd = await request.form()
-            data = dict(fd)
-    except Exception:
-        pass
-    # Fall back to query param (e.g. fetch('/api/sources/add?url=...') — no body sent)
+    """Add a novel URL to sources and start scraping immediately."""
+    # Check query param first (JS sends POST /api/sources/add?url=... with no body)
     url = request.query_params.get("url", "")
     if not url:
-        url = (data or {}).get("url", "")
+        # Try JSON body
+        try:
+            ct = request.headers.get("content-type", "")
+            if "application/json" in ct:
+                raw = await request.json()
+                if isinstance(raw, dict):
+                    url = raw.get("url", "")
+        except Exception:
+            pass
     if not url:
         raise HTTPException(400, "URL required")
     url = url.strip()
@@ -322,7 +318,9 @@ async def api_add_source(request: Request):
         raise HTTPException(409, "Already in sources")
     existing.add(url)
     sources.write_text("\n".join(sorted(existing)) + "\n")
-    _scraping_abort.set()
+    # Immediately start scraping this new novel
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, lambda: asyncio.run(scrape_novel(url)))
     return {"ok": True, "url": url}
 
 @app.post("/api/novels/update")
@@ -401,7 +399,7 @@ async def rss(slug):
         n.title as novel_title, n.author as novel_author
         FROM chapters c JOIN novels n ON c.novel_url=n.url
         WHERE c.novel_url=? ORDER BY c.scraped_at DESC""", (novel_url,)).fetchall()
-    rows.sort(key=lambda r: r[3])  # sort by scraped_at (pubDate timestamp) ascending, oldest first
+    rows.sort(key=lambda r: extract_chapter_num(r[1]))
     if not rows:
         raise HTTPException(status_code=404, detail="No chapters found")
     info = db.execute("SELECT title,author FROM novels WHERE url=?", (novel_url,)).fetchone()
