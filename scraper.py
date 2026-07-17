@@ -23,6 +23,7 @@ UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chr
 _scraping = threading.Lock()
 _scraping_novel = None
 _scraping_progress = {"message": "", "percent": 0, "total": 0, "scraped": 0}
+_scraping_abort = threading.Event()
 
 _local = threading.local()
 
@@ -284,7 +285,35 @@ async def api_remove_source(path):
     if sources.exists():
         lines = [l for l in sources.read_text().splitlines() if l.strip() != url]
         sources.write_text("\n".join(lines) + "\n")
+    _scraping_abort.set()
     return {"ok": True, "removed": url}
+
+@app.post("/api/sources/add")
+async def api_add_source(body: dict = None, url: str = None):
+    """Add a novel URL to sources and start scraping."""
+    # Support both JSON body and query param
+    from fastapi import Request
+    # Try to read body if content-type is json
+    try:
+        url = body.get("url", "") if body else ""
+    except Exception:
+        pass
+    if not url:
+        raise HTTPException(400, "URL required")
+    url = url.strip()
+    # Validate it looks like a novel URL
+    if "freewebnovel.com" not in url:
+        url = f"https://freewebnovel.com/novel/{url}"
+    sources = Path("sources.txt")
+    existing = set()
+    if sources.exists():
+        existing = {l.strip() for l in sources.read_text().splitlines() if l.strip()}
+    if url in existing:
+        raise HTTPException(409, "Already in sources")
+    existing.add(url)
+    sources.write_text("\n".join(sorted(existing)) + "\n")
+    _scraping_abort.set()
+    return {"ok": True, "url": url}
 
 @app.post("/api/novels/update")
 async def api_update_novel(body: dict):
