@@ -1,0 +1,19 @@
+services:
+  scraper:
+    build: .
+    container_name: fwn_scraper
+    restart: unless-stopped
+    environment:
+      SERVER_PORT: ${SERVER_PORT:-9310}
+      RUN_INTERVAL_HOURS: ${RUN_INTERVAL_HOURS:-6}
+      DELAY_BETWEEN_REQUESTS: ${DELAY_BETWEEN_REQUESTS:-10}
+    volumes:
+      - ./sources.txt:/app/sources.txt:ro
+      - db_data:/app/data
+      - logs:/app/logs
+    ports:
+      - "${SERVER_PORT:-9310}:9310"
+
+volumes:
+  db_data:
+  logs:
