@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""FreeWebNovel Scraper -> SQLite + RSS. Usage: python scraper.py scrape|serve|run"""
+"""FreeWebNovel Scraper -> SQLite + RSS + Dashboard."""
 import asyncio, hashlib, html, json, logging, os, re, sqlite3, sys, time, threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,8 +16,13 @@ DB_PATH = os.environ.get("DB_PATH", "novels.db")
 RUN_INTERVAL_HOURS = int(os.environ.get("RUN_INTERVAL_HOURS", "6"))
 DELAY_BETWEEN_REQUESTS = float(os.environ.get("DELAY_BETWEEN_REQUESTS", "10"))
 SERVER_PORT = int(os.environ.get("SERVER_PORT", "9310"))
+LOG_PATH = os.environ.get("LOG_PATH", "/app/logs/scraper.log")
 BASE = "https://freewebnovel.com"
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+
+_scraping = threading.Lock()
+_scraping_novel = None
+_scraping_progress = {"message": "", "percent": 0, "total": 0, "scraped": 0}
 
 _local = threading.local()
 
@@ -31,7 +36,6 @@ def _get_db():
 def norm_url(url):
     return url.replace("www.freewebnovel.com", "freewebnovel.com", 1)
 
-# ---- HTTP ----
 async def fetch(url, ref=None, retries=3):
     url = norm_url(url)
     if ref: ref = norm_url(ref)
@@ -46,7 +50,8 @@ async def fetch(url, ref=None, retries=3):
                 log.warning("HTTP %d for %s, retry %.1fs",r.status_code,url,w)
                 await asyncio.sleep(w)
         except Exception as e:
-            log.warning("Error: %s",e); await asyncio.sleep(2.0*(2**a))
+            log.warning("Error: %s",e)
+            await asyncio.sleep(2.0*(2**a))
     return None
 
 # ---- Parsing ----
@@ -86,109 +91,81 @@ def parse_chap_body(html):
     ti=t.xpath("//span[@class='chapter']/text()")
     if not ti: ti=t.xpath("//div[contains(@class,'reader-page-title')]//text()")
     raw=ti[0].strip() if ti else "Untitled"
-    title=re.sub(r'\s+',' ',raw).strip()
-    # Try multiple selectors for content paragraphs
+    title=re.sub(r'\\s+',' ',raw).strip()
     paras=t.xpath("//div[contains(@class,'m-read')]//p/text()")
     if not paras: paras=t.xpath("//div[contains(@class,'m-read')]//div[@class='chapter']//p/text()")
     content="\n".join(p.strip() for p in paras if p.strip())
     return {"title":title,"content":content} if content else None
 
 # ---- DB ----
-def _c(): return _get_db()
-
 def init_db():
-    c=_c()
-    c.execute("""CREATE TABLE IF NOT EXISTS novels (
+    db=_get_db()
+    db.execute("""CREATE TABLE IF NOT EXISTS novels (
         url TEXT PRIMARY KEY, title TEXT NOT NULL, author TEXT DEFAULT '',
         cover TEXT, genres TEXT DEFAULT '', status TEXT DEFAULT '',
         last_scraped INTEGER, chapter_count INTEGER DEFAULT 0)""")
-    c.execute("""CREATE TABLE IF NOT EXISTS chapters (
+    db.execute("""CREATE TABLE IF NOT EXISTS chapters (
         novel_url TEXT NOT NULL, chapter_url TEXT PRIMARY KEY,
         chapter_title TEXT NOT NULL, content TEXT NOT NULL,
         scraped_at INTEGER NOT NULL, content_hash TEXT NOT NULL,
         FOREIGN KEY(novel_url) REFERENCES novels(url))""")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_cn ON chapters(novel_url,scraped_at)")
-    c.commit()
-
-def add_src(url):
-    c=_c(); c.execute("INSERT OR IGNORE INTO novel_sources (url) VALUES (?)",(url,)); c.commit(); c.close()
+    db.execute("CREATE INDEX IF NOT EXISTS idx_cn ON chapters(novel_url,scraped_at)")
+    db.commit()
 
 def upsert_novel(novel_url, meta):
-    c=_c()
-    c.execute("""INSERT INTO novels (url,title,author,cover,genres,status,last_scraped)
+    db=_get_db()
+    db.execute("""INSERT INTO novels (url,title,author,cover,genres,status,last_scraped)
         VALUES (?,?,?,?,?,?,?) ON CONFLICT(url) DO UPDATE SET
         title=excluded.title,author=excluded.author,cover=excluded.cover,
         genres=excluded.genres,status=excluded.status,last_scraped=excluded.last_scraped""",
         (novel_url, meta["title"], meta["author"], meta["cover"],
          meta["genres"], meta["status"], int(time.time())))
-    c.commit()
+    db.commit()
 
 def upsert_chapters(novel_url, chs):
-    inserted=0; conn=sqlite3.connect(str(DB_PATH))
+    inserted=0; db=_get_db()
     for ci in chs:
         url=ci["url"]; title=ci["title"]
         if not title or title.lower()=="read first": continue
         content_hash=hashlib.md5(title.encode()).hexdigest()[:16]
-        existing=conn.execute("SELECT content_hash FROM chapters WHERE chapter_url=?",(url,)).fetchone()
+        existing=db.execute("SELECT content_hash FROM chapters WHERE chapter_url=?",(url,)).fetchone()
         if existing and existing[0]==content_hash: continue
         scraped=int(time.time())
-        conn.execute("""INSERT OR IGNORE INTO chapters (novel_url,chapter_url,chapter_title,content,scraped_at,content_hash)
+        db.execute("""INSERT OR IGNORE INTO chapters (novel_url,chapter_url,chapter_title,content,scraped_at,content_hash)
             VALUES (?,?,?,?,?,?)""", (novel_url,url,title,"",scraped,content_hash))
         inserted += 1
-    conn.commit()
-    conn.execute("UPDATE novels SET chapter_count=(SELECT COUNT(*) FROM chapters WHERE chapters.novel_url=novels.url) WHERE url=?", (novel_url,))
-    conn.commit()
+    db.commit()
+    db.execute("UPDATE novels SET chapter_count=(SELECT COUNT(*) FROM chapters WHERE chapters.novel_url=novels.url) WHERE url=?", (novel_url,))
+    db.commit()
     return inserted
 
 def get_new_chapters(novel_url, since):
-    conn=_c()
-    rows=conn.execute(
+    db=_get_db()
+    rows=db.execute(
         "SELECT chapter_url, chapter_title, content, scraped_at FROM chapters WHERE novel_url=? AND scraped_at>? ORDER BY scraped_at DESC",
         (novel_url, since)).fetchall()
     return [{"url":r[0],"title":r[1],"content":r[2],"scraped_at":r[3]} for r in rows]
 
 def extract_chapter_num(title):
-    """Extract chapter number from titles like 'Chapter 314 - Astralis Account'."""
-    import re
-    m = re.match(r'Chapter\s+(\d+)', title)
-    if m:
-        return int(m.group(1))
+    m = re.match(r'Chapter\\s+(\\d+)', title)
+    if m: return int(m.group(1))
     return 0
-
-def get_chapters_for_rss(novel_url, limit=9999):
-    conn=_c()
-    rows=conn.execute("""SELECT c.chapter_url, c.chapter_title, c.content, c.scraped_at,
-        n.title as novel_title, n.author as novel_author
-        FROM chapters c JOIN novels n ON c.novel_url=n.url
-        WHERE c.novel_url=?""",
-        (novel_url,)).fetchall()
-    # Sort by actual chapter number (extracted from title)
-    rows.sort(key=lambda r: extract_chapter_num(r[1]))
-    return rows[:limit]
-
-def get_all_chapters_for_rss(limit=200):
-    conn=_c()
-    rows=conn.execute("""SELECT c.chapter_url, c.chapter_title, c.content, c.scraped_at,
-        n.title as novel_title, n.author as novel_author
-        FROM chapters c JOIN novels n ON c.novel_url=n.url"""
-    ).fetchall()
-    rows.sort(key=lambda r: extract_chapter_num(r[1]))
-    return rows[:limit]
 
 # ---- Scrape ----
 async def scrape_novel(novel_url):
-    log.info("Scraping: %s", novel_url)
+    global _scraping_novel, _scraping_progress
+    _scraping_novel = os.path.basename(novel_url.rstrip("/"))
+    _scraping_progress = {"message": "Fetching novel metadata...", "percent": 0, "total": 0, "scraped": 0}
     ref_url = novel_url
     meta_html = await fetch(novel_url)
-    if not meta_html: return False, "Failed to fetch novel page"
+    if not meta_html:
+        return False, "Failed to fetch novel page"
     meta = parse_novel(meta_html)
     upsert_novel(novel_url, meta)
-
-    # Parse first page of chapters
+    _scraping_progress["message"] = f"Found {meta['total_chapters']} chapters total"
+    _scraping_progress["percent"] = 10
     chs = parse_chap_list(meta_html)
     log.info("  Found %d chapters on page 1 (total: %d)", len(chs), meta["total_chapters"])
-
-    # Fetch additional chapter pages via JSON API
     extra_chs = []
     if meta["total_pages"] > 1:
         for page in range(2, meta["total_pages"] + 1):
@@ -204,21 +181,14 @@ async def scrape_novel(novel_url):
                 page_chs = parse_chap_list(api_html)
                 extra_chs.extend(page_chs)
                 log.info("  Page %d: +%d chapters", page, len(page_chs))
-            else:
-                log.warning("  Page %d: failed", page)
-
     all_chapters = chs + extra_chs
     log.info("  Total chapter links: %d", len(all_chapters))
     upsert_chapters(novel_url, all_chapters)
-
-    # Scrape content for new chapters
     since = int(time.time()) - 86400 * 30
     new_chaps = get_new_chapters(novel_url, since)
-    max_scrape = cfg["scraping"].get("max_per_run", 50)
-
+    _scraping_progress["total"] = len(new_chaps)
     if new_chaps:
         log.info("  %d new chapters to scrape content for", len(new_chaps))
-
         async def _one(ci):
             chap_html = await fetch(ci["url"], ref=ref_url)
             body = parse_chap_body(chap_html)
@@ -226,108 +196,161 @@ async def scrape_novel(novel_url):
             content = body["content"]
             if content:
                 content_hash = hashlib.md5(content.encode()).hexdigest()[:16]
-                conn = _c()
-                conn.execute("""UPDATE chapters SET content=?, chapter_title=?,
+                db = _get_db()
+                db.execute("""UPDATE chapters SET content=?, chapter_title=?,
                     content_hash=?, scraped_at=? WHERE chapter_url=?""",
                     (content, body["title"], content_hash, int(time.time()), ci["url"]))
-                conn.commit()
+                db.commit()
                 return 1
             return 0
-
-        # Process in batches with delays
         batch_size = min(10, len(new_chaps))
         for i in range(0, len(new_chaps), batch_size):
             batch = new_chaps[i:i + batch_size]
             tasks = [_one(ci) for ci in batch]
             results = await asyncio.gather(*tasks)
             scraped = sum(results)
+            _scraping_progress["scraped"] += scraped
+            _scraping_progress["message"] = f"Batch {i}-{i+len(batch)}/{len(new_chaps)}: {scraped} done"
+            _scraping_progress["percent"] = 10 + int(80 * i / len(new_chaps))
             log.info("  Batch %d-%d/%d: scraped %d", i, i + len(batch), len(new_chaps), scraped)
             if i + batch_size < len(new_chaps):
                 await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
-
-    db = _c()
+    db = _get_db()
     db.execute("""UPDATE novels SET last_scraped=?,
         chapter_count=(SELECT COUNT(*) FROM chapters WHERE chapters.novel_url=novels.url)
         WHERE url=?""", (int(time.time()), novel_url))
-    c.commit()
+    db.commit()
+    _scraping_progress["percent"] = 100
+    _scraping_progress["message"] = f"Complete \\u2014 {len(new_chaps)} new chapters"
     return True, f"Scraped {len(new_chaps)} new chapters"
 
-# ---- Server ----
+# ---- API ----
 app = FastAPI()
 
-def progress_html():
-    novels = _c().execute("SELECT url,title,author,chapter_count FROM novels").fetchall()
-    if not novels:
-        return '<h1>No novels scraped yet.</h1>' 
-    rows = []
-    for n_url, n_title, n_author, n_count in novels:
-        db = _c()
-        total = db.execute("SELECT COUNT(*) FROM chapters WHERE novel_url=?", (n_url,)).fetchone()[0]
-        with_c = db.execute("SELECT COUNT(*) FROM chapters WHERE length(content) > 0 AND novel_url=?", (n_url,)).fetchone()[0]
-        first_title = db.execute("SELECT chapter_title FROM chapters WHERE novel_url=? ORDER BY length(content) DESC LIMIT 1", (n_url,)).fetchone()
-        latest = first_title[0] if first_title else "none"
-    
-        pct = (with_c / total * 100) if total else 0
-        bar = "█" * int(pct / 2) + "░" * (50 - int(pct / 2))
-        rows.append(f"""    <div style="margin:20px 0;padding:15px;border:1px solid #333;border-radius:8px;background:#1a1a1a">
-      <h2 style="margin:0 0 5px">{html.escape(n_title)}</h2>
-      <div style="color:#aaa;font-size:14px">{html.escape(n_author)} · {total} chapters · <span style="color:#0f0">{with_c}</span> scraped</div>
-      <div style="margin:10px 0;font-size:13px;letter-spacing:1px">{bar} {pct:.1f}%</div>
-      <div style="color:#888;font-size:12px">Latest with content: {html.escape(latest)}</div>
-    </div>
-""")
-    html_out = f"""<!DOCTYPE html>
-<html><head><title>Scraper Progress</title>
-<style>
-body {{ font-family: monospace; background: #000; color: #0f0; padding: 30px; margin: 0; }}
-h1 {{ color: #fff; }}
-</style>
-</head><body>
-<h1>FreeWebNovel Scraper</h1>
-{chr(10).join(rows)}
-</body></html>"""
-    return html_out, "text/html"
+@app.get("/api/status")
+def api_status():
+    db = _get_db()
+    novels = db.execute("SELECT url,title,author,status FROM novels").fetchall()
+    total_chaps = db.execute("SELECT COUNT(*) FROM chapters").fetchone()[0]
+    chaps_with_content = db.execute("SELECT COUNT(*) FROM chapters WHERE length(content) > 0").fetchone()[0]
+    return {
+        "total_novels": len(novels),
+        "total_chapters": total_chaps,
+        "chapters_with_content": chaps_with_content,
+        "scraping": {"active": bool(_scraping_novel), "novel": _scraping_novel or "", **_scraping_progress},
+        "novels": [{"url": r[0], "title": r[1], "author": r[2], "status": r[3]} for r in novels],
+    }
 
-@app.get("/progress")
-def progress():
-    html_out, _ = progress_html()
-    return HTMLResponse(content=html_out)
+@app.post("/api/scrape/{path:path}")
+async def api_scrape(path):
+    url = path if path.startswith("http") else f"https://freewebnovel.com/novel/{path}"
+    with _scraping:
+        if _scraping_novel:
+            raise HTTPException(409, f"Already scraping: {_scraping_novel}")
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, lambda: asyncio.run(scrape_novel(url)))
+    return {"ok": result[0], "message": result[1]}
 
-@app.get("/status")
-def status():
-    c = _c()
-    novels = c.execute("SELECT url,title,author,status FROM novels").fetchall()
-    c.close()
-    return {"novels": len(novels), "novel_list": [{"url":r[0],"title":r[1],"author":r[2],"status":r[3]} for r in novels]}
+@app.get("/api/scrape/{path:path}/progress")
+def api_scrape_progress(path):
+    return {"novel": _scraping_novel or "", **_scraping_progress}
+
+@app.post("/api/scrape-all")
+async def api_scrape_all():
+    with _scraping:
+        if _scraping_novel:
+            raise HTTPException(409, f"Already scraping: {_scraping_novel}")
+        sources = Path("sources.txt")
+        urls = [l.strip() for l in sources.read_text().splitlines() if l.strip()] if sources.exists() else []
+        if not urls:
+            raise HTTPException(404, "No sources in sources.txt")
+        db = _get_db()
+        db.execute("UPDATE novels SET last_scraped=NULL")
+        db.commit()
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, lambda: asyncio.run(asyncio.gather(*[scrape_novel(u) for u in urls])))
+        db.execute("UPDATE novels SET last_scraped=? WHERE url IN (SELECT url FROM novels)", (int(time.time()),))
+        db.commit()
+    return {"ok": True, "message": f"Scraped {len(urls)} novels"}
+
+@app.delete("/api/sources/{path:path}")
+async def api_remove_source(path):
+    url = path if path.startswith("http") else f"https://freewebnovel.com/novel/{path}"
+    db = _get_db()
+    db.execute("DELETE FROM novels WHERE url=?", (url,))
+    db.execute("DELETE FROM chapters WHERE novel_url=?", (url,))
+    db.commit()
+    sources = Path("sources.txt")
+    if sources.exists():
+        lines = [l for l in sources.read_text().splitlines() if l.strip() != url]
+        sources.write_text("\n".join(lines) + "\n")
+    return {"ok": True, "removed": url}
+
+@app.get("/api/novels/{path:path}")
+def api_novel_detail(path):
+    db = _get_db()
+    novel = db.execute("SELECT url,title,author,cover,genres,status,last_scraped,chapter_count FROM novels WHERE url=?", (path,)).fetchone()
+    if not novel:
+        raise HTTPException(404, "Novel not found")
+    n_url, n_title, n_author, n_cover, n_genres, n_status, n_last, n_count = novel
+    total_chaps = db.execute("SELECT COUNT(*) FROM chapters WHERE novel_url=?", (n_url,)).fetchone()[0]
+    with_content = db.execute("SELECT COUNT(*) FROM chapters WHERE length(content) > 0 AND novel_url=?", (n_url,)).fetchone()[0]
+    pct = (with_content / total_chaps * 100) if total_chaps else 0
+    chapters = db.execute("SELECT chapter_url, chapter_title, scraped_at FROM chapters WHERE novel_url=? ORDER BY scraped_at DESC", (n_url,)).fetchall()
+    return {
+        "url": n_url, "title": n_title, "author": n_author, "cover": n_cover,
+        "genres": n_genres, "status": n_status, "last_scraped": n_last,
+        "chapter_count": n_count, "total_chapters": total_chaps,
+        "with_content": with_content, "progress_pct": round(pct, 1),
+        "latest_chapter": chapters[0] if chapters else None,
+        "chapters": [{"url": c[0], "title": c[1], "scraped_at": c[2]} for c in chapters],
+    }
+
+@app.get("/api/novels/{path:path}/chapters")
+def api_chapter_content(path, limit=50, offset=0):
+    db = _get_db()
+    chapters = db.execute(
+        "SELECT chapter_url, chapter_title, content, scraped_at FROM chapters WHERE novel_url=? ORDER BY scraped_at DESC LIMIT ? OFFSET ?",
+        (path, limit, offset)).fetchall()
+    return {"chapters": [{"url": c[0], "title": c[1], "content_preview": c[2][:300] if c[2] else "", "scraped_at": c[2]} for c in chapters]}
+
+@app.get("/api/logs")
+def api_logs(lines=100):
+    try:
+        with open(LOG_PATH) as f:
+            all_lines = f.readlines()
+        return {"logs": all_lines[-int(lines):]}
+    except FileNotFoundError:
+        return {"logs": ["No log file found"]}
 
 @app.get("/rss/{path:path}")
 async def rss(path):
-    c = _c()
-    novel = c.execute("SELECT url FROM novels WHERE url=?", (path,)).fetchone()
-    c.close()
+    db = _get_db()
+    novel = db.execute("SELECT url FROM novels WHERE url=?", (path,)).fetchone()
     if not novel:
         raise HTTPException(status_code=404, detail=f"Novel not found: {path}")
-    rows = get_chapters_for_rss(novel[0])
+    rows = db.execute("""SELECT c.chapter_url, c.chapter_title, c.content, c.scraped_at,
+        n.title as novel_title, n.author as novel_author
+        FROM chapters c JOIN novels n ON c.novel_url=n.url
+        WHERE c.novel_url=? ORDER BY c.scraped_at DESC""", (path,)).fetchall()
+    rows.sort(key=lambda r: extract_chapter_num(r[1]))
     if not rows:
         raise HTTPException(status_code=404, detail="No chapters found")
-    c = _c()
-    info = c.execute("SELECT title,author FROM novels WHERE url=?", (novel[0],)).fetchone()
-    c.close()
+    info = db.execute("SELECT title,author FROM novels WHERE url=?", (path,)).fetchone()
     novel_title, novel_author = info or ("Unknown", "")
     items = ""
     for r in rows:
         chap_url, chap_title, content, scraped_at, _, _ = r
         pub_date = datetime.fromtimestamp(scraped_at, tz=timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
-        content = re.sub(r'<[^>]+>','',content)
+        content_clean = re.sub(r'<[^>]+>','',content) if content else ""
         items += f"""    <item>
       <title>{html.escape(chap_title)}</title>
       <link>{chap_url}</link>
       <guid isPermaLink="false">{hashlib.md5(chap_url.encode()).hexdigest()[:32]}</guid>
       <pubDate>{pub_date}</pubDate>
       <dc:creator>{html.escape(novel_author)}</dc:creator>
-      <description>{html.escape(content[:5000])}</description>
-    </item>
-"""
+      <description>{html.escape(content_clean[:5000])}</description>
+    </item>"""
     rss_str = f"""<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
   <channel>
@@ -342,23 +365,27 @@ async def rss(path):
 
 @app.get("/rss/all.xml")
 async def rss_all():
-    rows = get_all_chapters_for_rss()
+    db = _get_db()
+    rows = db.execute("""SELECT c.chapter_url, c.chapter_title, c.content, c.scraped_at,
+        n.title as novel_title, n.author as novel_author
+        FROM chapters c JOIN novels n ON c.novel_url=n.url
+        ORDER BY c.scraped_at DESC LIMIT 200""").fetchall()
+    rows.sort(key=lambda r: extract_chapter_num(r[1]))
     if not rows:
         raise HTTPException(status_code=404, detail="No chapters found")
     items = ""
     for r in rows:
         chap_url, chap_title, content, scraped_at, novel_title, novel_author = r
         pub_date = datetime.fromtimestamp(scraped_at, tz=timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
-        content = re.sub(r'<[^>]+>','',content)
+        content_clean = re.sub(r'<[^>]+>','',content) if content else ""
         items += f"""    <item>
       <title>{html.escape(novel_title)} - {html.escape(chap_title)}</title>
       <link>{chap_url}</link>
       <guid isPermaLink="false">{hashlib.md5(chap_url.encode()).hexdigest()[:32]}</guid>
       <pubDate>{pub_date}</pubDate>
       <dc:creator>{html.escape(novel_author)}</dc:creator>
-      <description>{html.escape(content[:3000])}</description>
-    </item>
-"""
+      <description>{html.escape(content_clean[:3000])}</description>
+    </item>"""
     rss_str = f"""<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
   <channel>
@@ -371,6 +398,98 @@ async def rss_all():
 </rss>"""
     return PlainTextResponse(content=rss_str, media_type="application/rss+xml")
 
+# ---- Dashboard ----
+def dashboard_html():
+    db = _get_db()
+    novels = db.execute("SELECT url,title,author,chapter_count,last_scraped FROM novels").fetchall()
+    total_novels = len(novels)
+    total_chaps = db.execute("SELECT COUNT(*) FROM chapters").fetchone()[0]
+    with_content = db.execute("SELECT COUNT(*) FROM chapters WHERE length(content) > 0").fetchone()[0]
+    scraping = _scraping_novel
+    pct = _scraping_progress.get("percent", 0)
+    msg = _scraping_progress.get("message", "")
+    active = bool(_scraping_novel)
+
+    rows = ""
+    for n_url, n_title, n_author, n_count, n_last in novels:
+        bar_pct = 0
+        latest = ""
+        if n_count:
+            wc = db.execute("SELECT COUNT(*) FROM chapters WHERE length(content) > 0 AND novel_url=?", (n_url,)).fetchone()[0]
+            bar_pct = wc / n_count * 100
+            lt = db.execute("SELECT chapter_title FROM chapters WHERE novel_url=? ORDER BY scraped_at DESC LIMIT 1", (n_url,)).fetchone()
+            latest = lt[0] if lt else ""
+        bar = chr(9608) * int(bar_pct / 2) + chr(9617) * (50 - int(bar_pct / 2)) if n_count else ""
+        last_str = "Never"
+        if n_last:
+            last_str = datetime.fromtimestamp(n_last, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+        # URL-encode for form action
+        safe_url = n_url.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+        rows += f"""    <tr>
+      <td><a href="/api/novels/{html.escape(n_title)}" style="color:#4fc3f7">{html.escape(n_title)}</a></td>
+      <td style="color:#aaa">{html.escape(n_author)}</td>
+      <td>{n_count}</td>
+      <td style="color:#0f0">{bar} {bar_pct:.0f}%</td>
+      <td style="font-size:12px;color:#888">{latest[:40]}</td>
+      <td style="font-size:12px;color:#888">{last_str}</td>
+      <td><a href="/api/scrape/{html.escape(n_url)}" style="color:#3fb950;text-decoration:none;font-size:12px">Scrape &rarr;</a></td>
+    </tr>"""
+
+    if not rows:
+        rows = "    <tr><td colspan=7 style='color:#8b949e;text-align:center'>No novels scraped yet. Add URLs to sources.txt.</td></tr>"
+
+    scrape_all = '<a href="/api/scrape-all" style="background:#ff9800;color:#fff;padding:8px 20px;border-radius:4px;text-decoration:none;font-size:14px;display:inline-block;margin-bottom:16px">Scrape All</a>'
+
+    if active:
+        indicator = f"""<div style="margin-bottom:24px;padding:12px 20px;background:#1a3a2a;border:1px solid #2ea043;border-radius:8px;color:#3fb950">
+      <strong>Scraping:</strong> {html.escape(scraping)} &mdash; {html.escape(msg)}
+      <div style="margin-top:8px;width:100%;height:8px;background:#21262d;border-radius:4px;overflow:hidden">
+        <div style="height:100%;width:{pct}%;background:linear-gradient(90deg,#2ea043,#3fb950)"></div>
+      </div>
+    </div>"""
+    else:
+        indicator = '<div style="margin-bottom:24px;padding:12px 20px;background:#1c2333;border:1px solid #30363d;border-radius:8px;color:#8b949e">No active scrape. Click "Scrape ->" on a novel above.</div>'
+
+    html_out = f"""<!DOCTYPE html>
+<html><head><title>FreeWebNovel Scraper</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0e17;color:#c9d1d9;min-height:100vh}}
+.header{{background:linear-gradient(135deg,#161b22,#0d1117);padding:24px 32px;border-bottom:1px solid #21262d}}
+.header h1{{color:#f0f6fc;font-size:24px;font-weight:600}}
+.header p{{color:#8b949e;margin-top:4px}}
+.container{{max-width:1200px;margin:0 auto;padding:24px}}
+.stats{{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:32px}}
+.stat-card{{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px}}
+.stat-card .label{{font-size:12px;color:#8b949e;text-transform:uppercase;letter-spacing:1px}}
+.stat-card .value{{font-size:32px;font-weight:700;color:#f0f6fc;margin-top:8px}}
+.stat-card .value.green{{color:#3fb950}}
+table{{width:100%;border-collapse:collapse;background:#161b22;border-radius:8px;overflow:hidden}}
+th{{background:#0d1117;padding:12px 16px;text-align:left;font-size:12px;color:#8b949e;text-transform:uppercase;letter-spacing:1px}}
+td{{padding:12px 16px;border-top:1px solid #21262d}}
+tr:hover{{background:#1c2129}}
+</style></head><body>
+<div class="header"><h1>FreeWebNovel Scraper</h1><p>Dashboard &amp; management console</p></div>
+<div class="container">
+<div class="stats">
+  <div class="stat-card"><div class="label">Novels</div><div class="value">{total_novels}</div></div>
+  <div class="stat-card"><div class="label">Chapters</div><div class="value">{total_chaps}</div></div>
+  <div class="stat-card"><div class="label">With Content</div><div class="value green">{with_content}</div></div>
+  <div class="stat-card"><div class="label">Status</div><div class="value" style="font-size:16px">{"<span style='color:#3fb950'>ACTIVE</span>" if active else "Idle"}</div></div>
+</div>
+{indicator}
+<div style="margin-bottom:16px">{scrape_all}</div>
+<table>
+  <thead><tr><th>Novel</th><th>Author</th><th>Chapters</th><th>Progress</th><th>Latest</th><th>Last Scraped</th><th>Action</th></tr></thead>
+  <tbody>{rows}</tbody>
+</table>
+</div></body></html>"""
+    return html_out
+
+@app.get("/progress")
+def progress():
+    return HTMLResponse(content=dashboard_html())
+
 # ---- CLI ----
 def main():
     if len(sys.argv) < 2:
@@ -378,7 +497,6 @@ def main():
         return
     cmd = sys.argv[1]
     init_db()
-
     if cmd == "scrape":
         sources = Path("sources.txt")
         if sources.exists():
@@ -393,7 +511,6 @@ def main():
             for u in urls:
                 await scrape_novel(u)
         asyncio.run(scrape_all())
-
     elif cmd == "run":
         sources = Path("sources.txt")
         urls = [l.strip() for l in sources.read_text().splitlines() if l.strip()] if sources.exists() else []
@@ -407,9 +524,8 @@ def main():
                 log.info("Waiting %d hours until next run...", RUN_INTERVAL_HOURS)
                 await asyncio.sleep(RUN_INTERVAL_HOURS * 3600)
         asyncio.run(_run())
-
     elif cmd == "serve":
-        log.info("Serving RSS on 0.0.0.0:%d", SERVER_PORT)
+        log.info("Serving dashboard on 0.0.0.0:%d", SERVER_PORT)
         uvicorn.run(app, host="0.0.0.0", port=SERVER_PORT)
     else:
         print(f"Unknown command: {cmd}")
