@@ -1,0 +1,10 @@
+# Scraped data - never commit
+*.db
+*.db-shm
+*.db-wal
+sources.txt
+logs/
+
+# Python
+__pycache__/
+*.pyc

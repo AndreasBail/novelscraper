@@ -286,6 +286,27 @@ async def api_remove_source(path):
         sources.write_text("\n".join(lines) + "\n")
     return {"ok": True, "removed": url}
 
+@app.post("/api/novels/update")
+async def api_update_novel(body: dict):
+    """Update a novel's title, author, or URL."""
+    url = body.get("slug") or body.get("url", "")
+    new_title = body.get("title")
+    new_author = body.get("author")
+    if not url:
+        raise HTTPException(400, "Novel slug or URL required")
+    db = _get_db()
+    # Find by slug
+    found = db.execute("SELECT url FROM novels WHERE url LIKE '%/novel/%s' OR url LIKE '%/novel/%s/' OR url LIKE '%s'", (url, url, url)).fetchone()
+    if not found:
+        raise HTTPException(404, "Novel not found")
+    orig_url = found[0]
+    if new_title:
+        db.execute("UPDATE novels SET title=? WHERE url=?", (new_title, orig_url))
+    if new_author:
+        db.execute("UPDATE novels SET author=? WHERE url=?", (new_author, orig_url))
+    db.commit()
+    return {"ok": True, "updated": orig_url}
+
 @app.get("/api/novels/{path:path}")
 def api_novel_detail(path):
     db = _get_db()
@@ -423,16 +444,20 @@ def dashboard_html():
         last_str = "Never"
         if n_last:
             last_str = datetime.fromtimestamp(n_last, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
-        # URL-encode for form action
         safe_url = n_url.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+        safe_title = html.escape(n_title)
+        slug = n_url.rstrip("/").split("/")[-1]
         rows += f"""    <tr>
-      <td><a href="/api/novels/{html.escape(n_title)}" style="color:#4fc3f7">{html.escape(n_title)}</a></td>
+      <td><a href="/rss/{slug}" style="color:#4fc3f7">{safe_title}</a></td>
       <td style="color:#aaa">{html.escape(n_author)}</td>
       <td>{n_count}</td>
       <td style="color:#0f0">{bar} {bar_pct:.0f}%</td>
       <td style="font-size:12px;color:#888">{latest[:40]}</td>
       <td style="font-size:12px;color:#888">{last_str}</td>
-      <td><a href="/api/scrape/{html.escape(n_url)}" style="color:#3fb950;text-decoration:none;font-size:12px">Scrape &rarr;</a></td>
+      <td><a href="/api/scrape/{html.escape(n_url)}" style="color:#3fb950;text-decoration:none;font-size:12px;margin-right:6px">Scrape &rarr;</a>
+        <button onclick="editNovel('{slug}', '{safe_title}', '{html.escape(n_author)}', '{html.escape(n_url)}')" style="color:#ffa657;text-decoration:none;font-size:12px;cursor:pointer;background:none;border:none;padding:0;margin-right:6px">Edit</button>
+        <button onclick="deleteNovel('{slug}', '{safe_title}')" style="color:#f85149;text-decoration:none;font-size:12px;cursor:pointer;background:none;border:none;padding:0">Delete</button>
+      </td>
     </tr>"""
 
     if not rows:
@@ -449,6 +474,52 @@ def dashboard_html():
     </div>"""
     else:
         indicator = '<div style="margin-bottom:24px;padding:12px 20px;background:#1c2333;border:1px solid #30363d;border-radius:8px;color:#8b949e">No active scrape. Click "Scrape ->" on a novel above.</div>'
+
+    js_code = r"""<script>
+function deleteNovel(slug, title) {
+  if (!confirm("Remove \"" + title + "\" and all its chapters?")) return;
+  fetch("/api/sources/" + slug, {method:"DELETE"})
+    .then(r=>r.json()).then(d=>{location.reload()})
+    .catch(e=>alert("Error: "+e));
+}
+function addNovel() {
+  var url = document.getElementById("addUrl").value.trim();
+  if (!url) return;
+  var st = document.getElementById("addStatus");
+  st.textContent = "Adding..."; st.style.color = "#8b949e";
+  fetch("/api/sources/add?url=" + encodeURIComponent(url), {method:"POST"})
+    .then(r=>r.json()).then(d=>{
+      st.textContent = "Added: " + d.url + ". Scraping started.";
+      st.style.color = "#3fb950";
+      document.getElementById("addUrl").value = "";
+      setTimeout(()=>location.reload(), 1500);
+    }).catch(e=>{st.textContent = "Error: "+e; st.style.color="#f85149";});
+}
+function editNovel(slug, title, author, url) {
+  var body = '<label style="color:#8b949e;font-size:13px;display:block;margin-bottom:4px">Title</label>'
+    + '<input id="editTitle" value="' + title + '" style="width:100%;padding:8px;margin-bottom:12px;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;font-size:14px">'
+    + '<label style="color:#8b949e;font-size:13px;display:block;margin-bottom:4px">Author</label>'
+    + '<input id="editAuthor" value="' + author + '" style="width:100%;padding:8px;margin-bottom:12px;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;font-size:14px">'
+    + '<label style="color:#8b949e;font-size:13px;display:block;margin-bottom:4px">URL</label>'
+    + '<input id="editUrl" value="' + url + '" style="width:100%;padding:8px;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;font-size:14px">';
+  document.getElementById("modalTitle").textContent = "Edit: " + title;
+  document.getElementById("modalBody").innerHTML = body;
+  document.getElementById("modalSave").onclick = function(){
+    var t = document.getElementById("editTitle").value.trim();
+    var a = document.getElementById("editAuthor").value.trim();
+    var u = document.getElementById("editUrl").value.trim();
+    if(!t||!u) return;
+    fetch("/api/novels/update", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({url:u, slug:slug, title:t, author:a})})
+      .then(r=>r.json()).then(d=>{closeModal();location.reload()})
+      .catch(e=>alert("Error: "+e));
+  };
+  document.getElementById("modal").style.display = "flex";
+}
+function closeModal() {
+  document.getElementById("modal").style.display = "none";
+}
+document.addEventListener("keydown", function(e){ if(e.key==="Escape") closeModal(); });
+</script>"""
 
     html_out = f"""<!DOCTYPE html>
 <html><head><title>FreeWebNovel Scraper</title>
@@ -483,6 +554,27 @@ tr:hover{{background:#1c2129}}
   <thead><tr><th>Novel</th><th>Author</th><th>Chapters</th><th>Progress</th><th>Latest</th><th>Last Scraped</th><th>Action</th></tr></thead>
   <tbody>{rows}</tbody>
 </table>
+<div style="margin-top:32px">
+  <div id="addForm" style="padding:20px;background:#161b22;border:1px solid #21262d;border-radius:8px">
+    <h3 style="color:#f0f6fc;margin-bottom:12px">Add Novel</h3>
+    <div style="display:flex;gap:8px;align-items:center">
+      <input id="addUrl" type="url" placeholder="https://freewebnovel.com/novel/..." style="flex:1;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;padding:8px 12px;border-radius:4px;font-size:14px">
+      <button onclick="addNovel()" style="background:#238636;color:#fff;border:none;padding:8px 20px;border-radius:4px;cursor:pointer;font-size:14px">Add &amp; Scrape</button>
+    </div>
+    <div id="addStatus" style="margin-top:8px;font-size:13px;color:#8b949e"></div>
+  </div>
+</div>
+<div id="modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:100;justify-content:center;align-items:center">
+  <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:24px;min-width:400px;max-width:600px">
+    <h3 id="modalTitle" style="color:#f0f6fc;margin-bottom:16px"></h3>
+    <div id="modalBody"></div>
+    <div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end">
+      <button onclick="closeModal()" style="background:#30363d;color:#c9d1d9;border:none;padding:8px 16px;border-radius:4px;cursor:pointer">Cancel</button>
+      <button id="modalSave" style="background:#238636;color:#fff;border:none;padding:8px 16px;border-radius:4px;cursor:pointer">Save</button>
+    </div>
+  </div>
+</div>
+{js_code}
 </div></body></html>"""
     return html_out
 
