@@ -9,7 +9,6 @@ services:
       DELAY_BETWEEN_REQUESTS: ${DELAY_BETWEEN_REQUESTS:-10}
       DB_PATH: ${DB_PATH:-/app/data/novels.db}
     volumes:
-      - ./sources.txt:/app/sources.txt
       - db_data:/app/data
       - logs:/app/logs
     ports:

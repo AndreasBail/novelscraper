@@ -10,7 +10,8 @@ from fastapi.responses import PlainTextResponse, HTMLResponse
 
 from scraper import (
     _get_db, _scraping_lock, _scraping_novel, _scraping_progress,
-    init_db, norm_url, scrape_all_novels_serial, scrape_novel, extract_chapter_num,
+    init_db, norm_url, scrape_all_novels_serial, scrape_novel,
+    extract_chapter_num, add_source, remove_source, list_sources,
 )
 from feed import rss_all, rss_single
 
@@ -58,10 +59,9 @@ async def api_scrape_all():
     with _scraping_lock:
         if _scraping_novel:
             raise HTTPException(409, f"Already scraping: {_scraping_novel}")
-        sources = Path("sources.txt")
-        urls = [l.strip() for l in sources.read_text().splitlines() if l.strip()] if sources.exists() else []
+        urls = list_sources()
         if not urls:
-            raise HTTPException(404, "No sources in sources.txt")
+            raise HTTPException(404, "No sources in database")
         db = _get_db()
         db.execute("UPDATE novels SET last_scraped=NULL")
         db.commit()
@@ -80,11 +80,8 @@ async def api_remove_source(path):
     db = _get_db()
     db.execute("DELETE FROM novels WHERE url=?", (url,))
     db.execute("DELETE FROM chapters WHERE novel_url=?", (url,))
+    remove_source(url)
     db.commit()
-    sources = Path("sources.txt")
-    if sources.exists():
-        lines = [l for l in sources.read_text().splitlines() if l.strip() != url]
-        sources.write_text("\n".join(lines) + "\n")
     return {"ok": True, "removed": url}
 
 @app.post("/api/sources/add")
@@ -104,12 +101,11 @@ async def api_add_source(request: Request):
     url = url.strip()
     if "freewebnovel.com" not in url:
         url = norm_url(f"https://freewebnovel.com/novel/{url}")
-    sources = Path("sources.txt")
-    existing = {l.strip() for l in sources.read_text().splitlines() if l.strip()} if sources.exists() else set()
-    if url in existing:
+    # Check if already in sources via database
+    db = _get_db()
+    if db.execute("SELECT 1 FROM sources WHERE url=?", (url,)).fetchone():
         raise HTTPException(409, "Already in sources")
-    existing.add(url)
-    sources.write_text("\n".join(sorted(existing)) + "\n")
+    add_source(url)
     with _scraping_lock:
         if _scraping_novel:
             raise HTTPException(409, f"Already scraping: {_scraping_novel}")
@@ -314,7 +310,7 @@ def _build_dashboard_rows(novels):
       </td>
     </tr>"""
     if not rows:
-        rows = "    <tr><td colspan=7 style='color:#8b949e;text-align:center'>No novels scraped yet. Add URLs to sources.txt.</td></tr>"
+        rows = "    <tr><td colspan=7 style='color:#8b949e;text-align:center'>No novels scraped yet. Add URLs using the form below.</td></tr>"
     return rows
 
 
@@ -400,8 +396,7 @@ def main():
     cmd = __import__("sys").argv[1]
     init_db()
     if cmd == "serve":
-        sources = Path("sources.txt")
-        urls = [l.strip() for l in sources.read_text().splitlines() if l.strip()] if sources.exists() else []
+        urls = list_sources()
         if urls:
             RUNNING = {"urls": urls}
             import threading

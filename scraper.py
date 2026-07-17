@@ -45,14 +45,16 @@ def _get_db():
 
 def init_db():
     db = _get_db()
+    db.execute("""CREATE TABLE IF NOT EXISTS sources (
+        url TEXT PRIMARY KEY, title TEXT DEFAULT '')""")
     db.execute("""CREATE TABLE IF NOT EXISTS novels (
         url TEXT PRIMARY KEY, title TEXT NOT NULL, author TEXT DEFAULT '',
         cover TEXT, genres TEXT DEFAULT '', status TEXT DEFAULT '',
         last_scraped INTEGER, chapter_count INTEGER DEFAULT 0)""")
     db.execute("""CREATE TABLE IF NOT EXISTS chapters (
         novel_url TEXT NOT NULL, chapter_url TEXT PRIMARY KEY,
-        chapter_title TEXT NOT NULL, content TEXT NOT NULL,
-        scraped_at INTEGER NOT NULL, content_hash TEXT NOT NULL,
+        chapter_title TEXT NOT NULL, content TEXT DEFAULT '',
+        scraped_at INTEGER NOT NULL, content_hash TEXT DEFAULT '',
         FOREIGN KEY(novel_url) REFERENCES novels(url))""")
     db.execute("CREATE INDEX IF NOT EXISTS idx_cn ON chapters(novel_url,scraped_at)")
     db.commit()
@@ -207,6 +209,24 @@ def extract_chapter_num(title):
     return 0
 
 
+def add_source(url):
+    """Add a novel URL to the sources table."""
+    db = _get_db()
+    db.execute("INSERT OR IGNORE INTO sources (url) VALUES (?)", (url,))
+    db.commit()
+
+def remove_source(url):
+    """Remove a novel URL from the sources table."""
+    db = _get_db()
+    db.execute("DELETE FROM sources WHERE url=?", (url,))
+    db.commit()
+
+def list_sources():
+    """Return all source URLs."""
+    db = _get_db()
+    return [r[0] for r in db.execute("SELECT url FROM sources").fetchall()]
+
+
 def _update_novel_chapter_count(novel_url):
     """Recount chapters for a novel."""
     db = _get_db()
@@ -261,10 +281,15 @@ async def scrape_novel(novel_url):
     all_chapters = chs + extra_chs
     log.info("  Total chapter links: %d", len(all_chapters))
     upsert_chapters(novel_url, all_chapters)
+    add_source(novel_url)
 
-    # Scrape content for new chapters (last 30 days)
-    since = int(time.time()) - 86400 * 30
-    new_chaps = get_new_chapters(novel_url, since)
+    # Only scrape chapters that don't already have content
+    db = _get_db()
+    pending = db.execute(
+        "SELECT chapter_url, chapter_title FROM chapters "
+        "WHERE novel_url=? AND content='' ORDER BY scraped_at DESC",
+        (novel_url,)).fetchall()
+    new_chaps = [{"url": r[0], "title": r[1]} for r in pending]
     _scraping_progress["total"] = len(new_chaps)
 
     if new_chaps:
@@ -278,7 +303,7 @@ async def scrape_novel(novel_url):
             _scraping_progress["scraped"] += scraped
             _scraping_progress["message"] = \
                 f"Batch {i}-{i + len(batch)}/{len(new_chaps)}: {scraped} done"
-            _scraping_progress["percent"] = 10 + int(80 * i / len(new_chaps))
+            _scraping_progress["percent"] = 10 + (80 if len(new_chaps) == 0 else int(80 * i / len(new_chaps)))
             log.info("  Batch %d-%d/%d: scraped %d",
                      i, i + len(batch), len(new_chaps), scraped)
             if i + batch_size < len(new_chaps):
