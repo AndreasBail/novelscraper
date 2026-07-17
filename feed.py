@@ -43,8 +43,8 @@ def rss_single(novel_url):
 
     novel_title, novel_author = rows[0][4], rows[0][5]
 
-    # Sort by chapter number for chronological ordering
-    rows.sort(key=lambda r: extract_chapter_num(r[1]))
+    # Sort by chapter number descending so highest/latest chapter appears first
+    rows.sort(key=lambda r: extract_chapter_num(r[1]), reverse=True)
 
     items = "\n".join(
         _rss_item(r[0], r[1], r[2], r[3], novel_title, novel_author)
