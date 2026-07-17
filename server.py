@@ -237,6 +237,28 @@ function scrapeSingle(url) {
       location.reload();
     }).catch(e=>alert('Error: '+e));
 }
+function updateScrapeStatus() {
+  fetch('/api/status').then(function(r) { return r.json(); }).then(function(d) {
+    var bar = document.getElementById('scrapeBar');
+    var info = document.getElementById('scrapeInfo');
+    if (d.scraping && d.scraping.active) {
+      bar.style.display = 'block';
+      info.style.display = 'block';
+      var pct = d.scraping.percent || 0;
+      var msg = (d.scraping.message || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      info.innerHTML = '<strong>Scraping:</strong> ' + (d.scraping.novel || '') + ' &mdash; ' + msg + ' (' + d.scraped + '/' + d.total + ')';
+      bar.querySelector('div').style.width = pct + '%';
+    } else {
+      bar.style.display = 'none';
+      info.style.display = 'none';
+    }
+  }).catch(function(){});
+}
+document.addEventListener('DOMContentLoaded', function() {
+  updateScrapeStatus();
+  setInterval(updateScrapeStatus, 3000);
+});
+
 function scrapeAll(btn) {
   var count = btn.dataset.count;
   if (!confirm('Scrape all ' + count + ' sources? This may take a while.')) return;
@@ -352,15 +374,8 @@ def dashboard_html():
     rows = _build_dashboard_rows(novels)
     scrape_all_btn = '<a href="javascript:void(0)" onclick="scrapeAll(this)" style="background:#ff9800;color:#fff;padding:8px 20px;border-radius:4px;text-decoration:none;font-size:14px;display:inline-block;margin-bottom:16px" id="scrapeAllBtn" data-count="' + str(total_novels) + '">Scrape All</a>'
 
-    if active:
-        indicator = f"""<div style="margin-bottom:24px;padding:12px 20px;background:#1a3a2a;border:1px solid #2ea043;border-radius:8px;color:#3fb950">
-      <strong>Scraping:</strong> {html_mod.escape(scraping)} &mdash; {html_mod.escape(msg)}
-      <div style="margin-top:8px;width:100%;height:8px;background:#21262d;border-radius:4px;overflow:hidden">
-        <div style="height:100%;width:{pct}%;background:linear-gradient(90deg,#2ea043,#3fb950)"></div>
-      </div>
-    </div>"""
-    else:
-        indicator = '<div style="margin-bottom:24px;padding:12px 20px;background:#1c2333;border:1px solid #30363d;border-radius:8px;color:#8b949e">No active scrape. Click "Scrape ->" on a novel above.</div>'
+    indicator = '<div id="scrapeInfo" style="margin-bottom:24px;padding:12px 20px;background:#1a3a2a;border:1px solid #2ea043;border-radius:8px;color:#3fb950;display:none"><strong>Scraping:</strong> <span id="scrapeMsg"></span></div>'
+    indicator_bar = '<div id="scrapeBar" style="display:none;margin-bottom:16px;padding:12px 20px;background:#161b22;border:1px solid #21262d;border-radius:8px"><div style="width:100%;height:8px;background:#21262d;border-radius:4px;overflow:hidden"><div style="height:100%;width:0%;background:linear-gradient(90deg,#2ea043,#3fb950);border-radius:4px;transition:width 0.5s"></div></div></div>'
 
     html_out = f"""<!DOCTYPE html>
 <html><head><title>FreeWebNovel Scraper</title>
@@ -373,15 +388,17 @@ def dashboard_html():
   <div class="stat-card"><div class="label">With Content</div><div class="value green">{with_content}</div></div>
   <div class="stat-card"><div class="label">Status</div><div class="value" style="font-size:16px">{"<span style='color:#3fb950'>ACTIVE</span>" if active else "Idle"}</div></div>
 </div>
-{indicator}
-<div style="margin-bottom:16px">{scrape_all_btn}</div>
 <div class="table-wrap">
 <table>
   <thead><tr><th>Novel</th><th>Author</th><th>Chapters</th><th>Progress</th><th>Latest</th><th>Last Scraped</th><th>Action</th></tr></thead>
   <tbody>{rows}</tbody>
 </table>
 </div>
-<div style="margin-top:32px">
+{indicator_bar}
+{indicator}
+<div style="margin-bottom:16px">{scrape_all_btn}</div>
+</div>
+<div style="margin-top:24px">
   <div id="addForm" style="padding:20px;background:#161b22;border:1px solid #21262d;border-radius:8px">
     <h3 style="color:#f0f6fc;margin-bottom:12px">Add Novel</h3>
     <div style="display:flex;gap:8px;align-items:center">
