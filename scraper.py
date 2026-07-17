@@ -344,20 +344,28 @@ def api_logs(lines=100):
     except FileNotFoundError:
         return {"logs": ["No log file found"]}
 
-@app.get("/rss/{path:path}")
-async def rss(path):
+@app.get("/rss/{slug:path}")
+async def rss(slug):
     db = _get_db()
-    novel = db.execute("SELECT url FROM novels WHERE url=?", (path,)).fetchone()
+    # Resolve slug to full novel URL
+    # Try exact match first (for full URLs passed as slug)
+    novel = db.execute("SELECT url FROM novels WHERE url=?", (slug,)).fetchone()
     if not novel:
-        raise HTTPException(status_code=404, detail=f"Novel not found: {path}")
+        # Try matching the last path segment as a slug
+        slug_name = slug.rstrip("/").split("/")[-1]
+        novel = db.execute("SELECT url FROM novels WHERE url LIKE ? OR url LIKE ? OR url=?",
+                           (f"%/{slug_name}%", f"%/{slug_name}/", slug_name)).fetchone()
+    if not novel:
+        raise HTTPException(status_code=404, detail=f"Novel not found: {slug}")
+    novel_url = novel[0]
     rows = db.execute("""SELECT c.chapter_url, c.chapter_title, c.content, c.scraped_at,
         n.title as novel_title, n.author as novel_author
         FROM chapters c JOIN novels n ON c.novel_url=n.url
-        WHERE c.novel_url=? ORDER BY c.scraped_at DESC""", (path,)).fetchall()
+        WHERE c.novel_url=? ORDER BY c.scraped_at DESC""", (novel_url,)).fetchall()
     rows.sort(key=lambda r: extract_chapter_num(r[1]))
     if not rows:
         raise HTTPException(status_code=404, detail="No chapters found")
-    info = db.execute("SELECT title,author FROM novels WHERE url=?", (path,)).fetchone()
+    info = db.execute("SELECT title,author FROM novels WHERE url=?", (novel_url,)).fetchone()
     novel_title, novel_author = info or ("Unknown", "")
     items = ""
     for r in rows:
@@ -376,7 +384,7 @@ async def rss(path):
 <rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
   <channel>
     <title>{html.escape(novel_title)} - RSS</title>
-    <link>{path}</link>
+    <link>{novel_url}</link>
     <description>Latest chapters of {html.escape(novel_title)} by {html.escape(novel_author)}</description>
     <language>en</language>
     <lastBuildDate>{datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")}</lastBuildDate>
@@ -454,9 +462,10 @@ def dashboard_html():
       <td style="color:#0f0">{bar} {bar_pct:.0f}%</td>
       <td style="font-size:12px;color:#888">{latest[:40]}</td>
       <td style="font-size:12px;color:#888">{last_str}</td>
-      <td><a href="/api/scrape/{html.escape(n_url)}" style="color:#3fb950;text-decoration:none;font-size:12px;margin-right:6px">Scrape &rarr;</a>
-        <button onclick="editNovel('{slug}', '{safe_title}', '{html.escape(n_author)}', '{html.escape(n_url)}')" style="color:#ffa657;text-decoration:none;font-size:12px;cursor:pointer;background:none;border:none;padding:0;margin-right:6px">Edit</button>
-        <button onclick="deleteNovel('{slug}', '{safe_title}')" style="color:#f85149;text-decoration:none;font-size:12px;cursor:pointer;background:none;border:none;padding:0">Delete</button>
+      <td style="white-space:nowrap">
+        <a href="/api/scrape/{html.escape(n_url)}" title="Scrape" style="color:#3fb950;text-decoration:none;padding:2px 4px;font-size:16px;display:inline-block;border:1px solid transparent;border-radius:4px">▶</a>
+        <button onclick="editNovel('{slug}', '{safe_title}', '{html.escape(n_author)}', '{html.escape(n_url)}')" title="Edit" style="color:#ffa657;text-decoration:none;padding:2px 4px;font-size:16px;cursor:pointer;background:none;border:1px solid transparent;border-radius:4px">✎</button>
+        <button onclick="deleteNovel('{slug}', '{safe_title}')" title="Delete" style="color:#f85149;text-decoration:none;padding:2px 4px;font-size:16px;cursor:pointer;background:none;border:1px solid transparent;border-radius:4px">✕</button>
       </td>
     </tr>"""
 
