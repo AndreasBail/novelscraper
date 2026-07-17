@@ -230,6 +230,29 @@ function deleteNovel(slug, title) {
     .then(r=>r.json()).then(d=>{location.reload()})
     .catch(e=>alert('Error: '+e));
 }
+function scrapeSingle(url) {
+  fetch('/api/scrape/' + encodeURIComponent(url), {method:'POST'})
+    .then(r=>r.json()).then(d=>{
+      alert(d.message);
+      location.reload();
+    }).catch(e=>alert('Error: '+e));
+}
+function scrapeAll(btn) {
+  var count = btn.dataset.count;
+  if (!confirm('Scrape all ' + count + ' sources? This may take a while.')) return;
+  btn.disabled = true;
+  btn.textContent = 'Scraping...';
+  fetch('/api/scrape-all', {method:'POST'})
+    .then(r=>r.json()).then(d=>{
+      alert(d.message);
+      if (d.failed && d.failed.length) alert('Failed: ' + d.failed.join(', '));
+      location.reload();
+    }).catch(e=>{
+      btn.disabled = false;
+      btn.textContent = 'Scrape All';
+      alert('Error: '+e);
+    });
+}
 function addNovel() {
   var url = document.getElementById('addUrl').value.trim();
   if (!url) return;
@@ -304,7 +327,7 @@ def _build_dashboard_rows(novels):
       <td style="font-size:12px;color:#888">{latest[:40]}</td>
       <td style="font-size:12px;color:#888">{last_str}</td>
       <td style="text-align:center">
-        <a href="/api/scrape/{html_mod.escape(n_url)}" title="Scrape" style="color:#3fb950;text-decoration:none;padding:2px 6px;font-size:16px;display:inline-block">▶</a>
+        <a href="javascript:void(0)" onclick="scrapeSingle('{n_url}')" title="Scrape" style="color:#3fb950;text-decoration:none;padding:2px 6px;font-size:16px;display:inline-block">▶</a>
         <button onclick="editNovel('{slug}', '{safe_title}', '{safe_author}', '{html_mod.escape(n_url)}')" title="Edit" style="color:#ffa657;text-decoration:none;padding:2px 6px;font-size:16px;cursor:pointer;background:none;border:none">✎</button>
         <button onclick="deleteNovel('{slug}', '{safe_title}')" title="Delete" style="color:#f85149;text-decoration:none;padding:2px 6px;font-size:16px;cursor:pointer;background:none;border:none">✕</button>
       </td>
@@ -327,7 +350,7 @@ def dashboard_html():
     active = bool(_scraping_novel)
 
     rows = _build_dashboard_rows(novels)
-    scrape_all_btn = '<a href="/api/scrape-all" style="background:#ff9800;color:#fff;padding:8px 20px;border-radius:4px;text-decoration:none;font-size:14px;display:inline-block;margin-bottom:16px">Scrape All</a>'
+    scrape_all_btn = '<a href="javascript:void(0)" onclick="scrapeAll(this)" style="background:#ff9800;color:#fff;padding:8px 20px;border-radius:4px;text-decoration:none;font-size:14px;display:inline-block;margin-bottom:16px" id="scrapeAllBtn" data-count="' + str(total_novels) + '">Scrape All</a>'
 
     if active:
         indicator = f"""<div style="margin-bottom:24px;padding:12px 20px;background:#1a3a2a;border:1px solid #2ea043;border-radius:8px;color:#3fb950">
