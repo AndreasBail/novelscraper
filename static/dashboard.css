@@ -1,0 +1,73 @@
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0d1117;color:#c9d1d9;min-height:100vh;display:flex;flex-direction:column}
+.header{background:linear-gradient(135deg,#161b22,#0d1117);padding:16px 24px;border-bottom:1px solid #21262d;flex-shrink:0}
+.header h1{color:#f0f6fc;font-size:20px;font-weight:600}
+.header p{color:#8b949e;margin-top:2px;font-size:12px}
+.container{flex:1;max-width:960px;width:100%;margin:0 auto;padding:16px 24px 40px}
+
+/* Stats bar */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px}
+.stat-card{background:#161b22;border:1px solid #21262d;border-radius:6px;padding:12px;text-align:center}
+.stat-card .label{font-size:10px;color:#8b949e;text-transform:uppercase;letter-spacing:0.5px}
+.stat-card .value{font-size:20px;font-weight:700;color:#f0f6fc;margin-top:4px}
+.stat-card .value.green{color:#3fb950}
+
+/* Scrape status */
+#scrapeStatus{background:#161b22;border:1px solid #21262d;border-radius:6px;padding:12px 16px;margin-bottom:16px;display:none}
+#scrapeStatus .text{font-size:13px}
+#scrapeStatus .text span{color:#3fb950}
+#scrapeStatus .bar{width:100%;height:8px;background:#21262d;border-radius:4px;overflow:hidden;margin-top:8px}
+#scrapeStatus .bar .fill{height:100%;background:linear-gradient(90deg,#238636,#3fb950);border-radius:4px;transition:width 0.4s}
+
+/* Table */
+table{width:100%;border-collapse:collapse;background:#161b22;border-radius:8px;overflow:hidden;border:1px solid #21262d}
+thead th{background:#0d1117;padding:10px 14px;text-align:left;font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #21262d}
+tbody td{padding:10px 14px;border-bottom:1px solid #21262d;font-size:13px;vertical-align:middle}
+tbody tr:hover{background:#1c2129}
+tbody tr:last-child td{border-bottom:none}
+td a{color:#4fc3f7;text-decoration:none}
+td a:hover{text-decoration:underline}
+
+/* Progress bar - BIGGER */
+.progress-cell{display:flex;align-items:center;gap:8px}
+.progress-track{flex:1;height:24px;background:#21262d;border-radius:6px;overflow:hidden;position:relative}
+.progress-fill{height:100%;background:linear-gradient(90deg,#238636,#3fb950);border-radius:6px;transition:width 0.5s}
+.progress-pct{font-size:12px;font-weight:600;min-width:38px;text-align:right}
+.progress-pct.done{color:#3fb950}
+.progress-pct.low{color:#8b949e}
+
+/* Actions */
+.actions{display:flex;gap:4px;justify-content:center}
+.actions button{background:none;border:none;cursor:pointer;font-size:16px;padding:4px 6px;border-radius:4px;transition:opacity 0.2s}
+.actions button:hover{opacity:0.7}
+.actions .scrape{color:#3fb950}
+.actions .edit{color:#ffa657}
+.actions .delete{color:#f85149}
+
+/* Empty state */
+.empty-msg{text-align:center;padding:24px;color:#8b949e;font-size:13px}
+
+/* Add novel form */
+.card{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:16px;margin-top:16px}
+.card-header{font-size:12px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px}
+.add-form{display:flex;gap:8px;align-items:flex-start;max-width:520px}
+.add-form input{flex:1;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;padding:8px 12px;border-radius:6px;font-size:13px}
+.add-form input:focus{outline:none;border-color:#58a6ff}
+.add-form button{background:#238636;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap}
+.add-form button:hover{background:#2ea043}
+.add-form button:disabled{background:#30363d;color:#8b949e;cursor:not-allowed}
+.add-status{font-size:12px;margin-top:8px;min-height:16px}
+
+/* Modal */
+#modal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:100;justify-content:center;align-items:center}
+#modal.show{display:flex}
+#modal .modal-inner{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:24px;width:100%;max-width:420px}
+#modal .modal-title{color:#f0f6fc;margin-bottom:16px;font-size:16px}
+#modal label{color:#8b949e;font-size:12px;display:block;margin-bottom:4px}
+#modal input{width:100%;padding:8px;margin-bottom:12px;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;font-size:13px}
+#modal input:focus{outline:none;border-color:#58a6ff}
+#modal .modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+#modal .modal-actions button{border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:13px}
+#modal .btn-cancel{background:#30363d;color:#c9d1d9}
+#modal .btn-save{background:#238636;color:#fff}

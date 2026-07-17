@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html><head><title>FreeWebNovel Scraper</title>
+<link rel="stylesheet" href="/static/dashboard.css"></head><body>
+<div class="header">
+  <h1>FreeWebNovel Scraper</h1>
+  <p>Dashboard &amp; management console</p>
+</div>
+<div class="container">
+
+  <!-- Stats -->
+  <div class="stats" id="statsBox">
+    <div class="stat-card"><div class="label">Novels</div><div class="value" id="statNovels">-</div></div>
+    <div class="stat-card"><div class="label">Chapters</div><div class="value" id="statChapters">-</div></div>
+    <div class="stat-card"><div class="label">With Content</div><div class="value green" id="statContent">-</div></div>
+    <div class="stat-card"><div class="label">Status</div><div class="value" id="statStatus">-</div></div>
+  </div>
+
+  <!-- Scrape Status Bar (above table) -->
+  <div id="scrapeStatus" class="scrape-info" style="display:none">
+    <div class="text" id="scrapeText"></div>
+    <div class="bar"><div class="fill" id="scrapeFill"></div></div>
+  </div>
+
+  <!-- Novel Table -->
+  <table>
+    <thead>
+      <tr>
+        <th>Novel</th>
+        <th>Author</th>
+        <th>Chapters</th>
+        <th>Progress</th>
+        <th>Latest</th>
+        <th>Last Scraped</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody id="novelBody">
+      <tr><td colspan="7" class="empty-msg">Loading...</td></tr>
+    </tbody>
+  </table>
+
+  <!-- Add Novel Form -->
+  <div class="card">
+    <div class="card-header">Add Novel</div>
+    <div class="add-form">
+      <input id="addUrl" type="url" placeholder="https://freewebnovel.com/novel/..." />
+      <button id="addBtn" onclick="addNovel()">Add &amp; Scrape</button>
+    </div>
+    <div id="addStatus" class="add-status"></div>
+  </div>
+
+</div>
+
+<!-- Edit Modal -->
+<div id="modal">
+  <div class="modal-inner">
+    <div class="modal-title" id="modalTitle">Edit Novel</div>
+    <label>Title</label>
+    <input id="editTitle" />
+    <label>Author</label>
+    <input id="editAuthor" />
+    <label>URL</label>
+    <input id="editUrl" />
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+      <button class="btn-save" id="modalSave">Save</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/dashboard.js"></script>
+</body></html>
