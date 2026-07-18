@@ -25,6 +25,7 @@ log = logging.getLogger("fwn.scrape")
 
 DB_PATH = os.environ.get("DB_PATH", "/app/data/novels.db")
 DELAY_BETWEEN_REQUESTS = float(os.environ.get("DELAY_BETWEEN_REQUESTS", "180"))
+DELAY_PAGE_LIST = float(os.environ.get("DELAY_PAGE_LIST", "5"))
 BASE = "https://freewebnovel.com"
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 
@@ -269,7 +270,7 @@ async def scrape_novel(novel_url):
             log.info("  Fetching chapter page %d/%d...", page, meta["total_pages"])
             api_html = await fetch(api_url)
             if page < meta["total_pages"]:
-                await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
+                await asyncio.sleep(DELAY_PAGE_LIST)
             if api_html:
                 try:
                     data = json.loads(api_html)
