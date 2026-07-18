@@ -62,7 +62,7 @@ function _renderNovels(novels) {
       + '<td><div class="actions">'
         + '<button class="chevron-btn" onclick="toggleMenu(this)" title="Actions">&#8942;</button>'
         + '<div class="dropdown-menu">'
-          + '<button class="menu-scrape" data-idx="' + str(i) + '" onclick="handleMenuClick(this,\'scrape\')">&#9654; Scrape</button>'
+          + '<button class="menu-scrape" data-idx="' + i + '" onclick="handleMenuClick(this,\'scrape\')">&#9654; Scrape</button>'
           + '<button class="menu-edit" data-idx="' + str(i) + '" onclick="handleMenuClick(this,\'edit\')">&#10098; Edit</button>'
           + '<button class="menu-delete" data-idx="' + str(i) + '" onclick="handleMenuClick(this,\'delete\')">&#10005; Delete</button>'
         + '</div>'
