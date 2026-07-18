@@ -25,7 +25,7 @@ log = logging.getLogger("fwn.scrape")
 
 DB_PATH = os.environ.get("DB_PATH", "/app/data/novels.db")
 DELAY_BETWEEN_REQUESTS = float(os.environ.get("DELAY_BETWEEN_REQUESTS", "180"))
-DELAY_PAGE_LIST = float(os.environ.get("DELAY_PAGE_LIST", "2"))
+DELAY_PAGE_LIST = float(os.environ.get("DELAY_PAGE_LIST", "1"))
 BASE = "https://freewebnovel.com"
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 
