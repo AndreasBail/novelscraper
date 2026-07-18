@@ -24,7 +24,7 @@ logging.basicConfig(
 log = logging.getLogger("fwn.scrape")
 
 DB_PATH = os.environ.get("DB_PATH", "/app/data/novels.db")
-DELAY_BETWEEN_REQUESTS = float(os.environ.get("DELAY_BETWEEN_REQUESTS", "120"))
+DELAY_BETWEEN_REQUESTS = float(os.environ.get("DELAY_BETWEEN_REQUESTS", "180"))
 BASE = "https://freewebnovel.com"
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 
@@ -294,19 +294,14 @@ async def scrape_novel(novel_url):
 
     if new_chaps:
         log.info("  %d new chapters to scrape content for", len(new_chaps))
-        batch_size = min(10, len(new_chaps))
-        for i in range(0, len(new_chaps), batch_size):
-            batch = new_chaps[i:i + batch_size]
-            tasks = [_scrape_chapter(ci, ref_url) for ci in batch]
-            results = await asyncio.gather(*tasks)
-            scraped = sum(results)
-            _scraping_progress["scraped"] += scraped
-            _scraping_progress["message"] = \
-                f"Batch {i}-{i + len(batch)}/{len(new_chaps)}: {scraped} done"
-            _scraping_progress["percent"] = 10 + (80 if len(new_chaps) == 0 else int(80 * i / len(new_chaps)))
-            log.info("  Batch %d-%d/%d: scraped %d",
-                     i, i + len(batch), len(new_chaps), scraped)
-            if i + batch_size < len(new_chaps):
+        for i in range(len(new_chaps)):
+            task = _scrape_chapter(new_chaps[i], ref_url)
+            result = await task
+            _scraping_progress["scraped"] += result
+            _scraping_progress["message"] = f"Chapter {i+1}/{len(new_chaps)}: {result} saved"
+            _scraping_progress["percent"] = 10 + int(80 * (i + 1) / len(new_chaps))
+            log.info("  %d/%d: %s", i+1, len(new_chaps), "saved" if result else "skipped")
+            if i + 1 < len(new_chaps):
                 await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
 
     # Mark complete
