@@ -30,6 +30,11 @@ BASE = "https://freewebnovel.com"
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 
 SCRAPE_BATCH_SIZE = int(os.environ.get("SCRAPE_BATCH_SIZE", "10"))
+
+# Dynamic rate-limit backoff: tracked consecutive 429s, increases wait
+_429_consecutive = 0
+_MAX_429_WAIT = 300  # max 5 minutes between requests
+_MIN_429_WAIT = 10   # min 10 seconds on first 429
 _scraping_lock = threading.Lock()
 _scraping_novel = None
 _scraping_progress = {"message": "", "percent": 0, "total": 0, "scraped": 0}
@@ -66,6 +71,22 @@ def norm_url(url):
     return url.replace("www.freewebnovel.com", "freewebnovel.com", 1)
 
 
+async def _429_wait():
+    """Calculate dynamic wait time after a 429, exponential backoff."""
+    global _429_consecutive
+    wait = min(_MIN_429_WAIT * (2 ** _429_consecutive), _MAX_429_WAIT)
+    return wait
+
+
+async def _handle_429():
+    """Increment 429 counter, calculate and execute wait."""
+    global _429_consecutive
+    _429_consecutive += 1
+    wait = await _429_wait()
+    log.warning("Rate limited (consecutive %d). Waiting %.1fs...", _429_consecutive, wait)
+    await asyncio.sleep(wait)
+
+
 async def fetch(url, ref=None, retries=3):
     url = norm_url(url)
     if ref:
@@ -78,8 +99,17 @@ async def fetch(url, ref=None, retries=3):
         try:
             r = httpx.get(url, headers=h, timeout=30.0, follow_redirects=True)
             if r.status_code == 200:
+                # Reset 429 counter on success
+                global _429_consecutive
+                if _429_consecutive > 0:
+                    log.info("429 streak reset after %d consecutive errors", _429_consecutive)
+                    _429_consecutive = 0
                 return r.text
-            if r.status_code in (429, 500, 502, 503):
+            if r.status_code == 429:
+                await _handle_429()
+                # After 429, retry immediately (don't count toward normal retries)
+                continue
+            if r.status_code in (500, 502, 503):
                 wait = 2.0 * (2 ** attempt)
                 log.warning("HTTP %d for %s, retry %.1fs", r.status_code, url, wait)
                 await asyncio.sleep(wait)

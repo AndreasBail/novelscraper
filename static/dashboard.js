@@ -28,7 +28,16 @@ function loadNovels() {
     }
     _novelsData = d.novels || [];
     _renderNovels(_novelsData);
-  }).catch(function(){});
+  }).catch(function(e){
+    var statusEl = document.getElementById('statStatus');
+    if(statusEl){
+      statusEl.innerHTML = '<span style="color:#f85149">Error loading data</span>';
+    }
+    var body = document.getElementById('novelBody');
+    if(body){
+      body.innerHTML = '<tr><td colspan="7" style="color:#f85149">Failed to load novels. Check console.</td></tr>';
+    }
+  });
 }
 
 function _renderNovels(novels) {
