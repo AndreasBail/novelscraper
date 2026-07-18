@@ -35,7 +35,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 class PermissionPolicyMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         response = await call_next(request)
-        response.headers.pop("permissions-policy", None)
+        if "permissions-policy" in response.headers:
+            del response.headers["permissions-policy"]
         return response
 
 app.add_middleware(PermissionPolicyMiddleware)
