@@ -63,7 +63,7 @@ function _renderNovels(novels) {
         + '<button class="chevron-btn" onclick="toggleMenu(this)" title="Actions">&#8942;</button>'
         + '<div class="dropdown-menu">'
           + '<button class="menu-scrape" data-idx="' + i + '" onclick="handleMenuClick(this,\'scrape\')">&#9654; Scrape</button>'
-          + '<button class="menu-edit" data-idx="' + i + '" onclick="handleMenuClick(this,\'edit\')">&#10098; Edit</button>'
+          + '<button class="menu-edit" data-idx="' + i + '" onclick="handleMenuClick(this,\'edit\')">&#9998; Edit</button>'
           + '<button class="menu-delete" data-idx="' + i + '" onclick="handleMenuClick(this,\'delete\')">&#10005; Delete</button>'
         + '</div>'
     + '</div></td>'
@@ -145,7 +145,7 @@ function openEdit(slug, title, author, url) {
 }
 
 function closeModal() {
-  document.getElementById('modal').className = '';
+  document.getElementById('modal').style.display = 'none';
 }
 
 function handleMenuClick(btn, action) {
