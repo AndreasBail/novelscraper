@@ -266,7 +266,10 @@ async def scrape_novel(novel_url):
         for page in range(2, meta["total_pages"] + 1):
             api_url = novel_url + "?ajax=chapters&page=" + str(page) + \
                 "&pageSize=" + str(meta["page_size"])
+            log.info("  Fetching chapter page %d/%d...", page, meta["total_pages"])
             api_html = await fetch(api_url)
+            if page < meta["total_pages"]:
+                await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
             if api_html:
                 try:
                     data = json.loads(api_html)
