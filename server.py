@@ -29,6 +29,17 @@ STATIC_DIR = Path(__file__).parent / "static"
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+# Strip unrecognized Permissions-Policy features
+from starlette.middleware.base import BaseHTTPMiddleware
+
+class PermissionPolicyMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers.pop("permissions-policy", None)
+        return response
+
+app.add_middleware(PermissionPolicyMiddleware)
+
 
 # ── Status ──
 @app.get("/api/status")
