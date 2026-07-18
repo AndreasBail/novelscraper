@@ -30,10 +30,10 @@ td a{color:#4fc3f7;text-decoration:none}
 td a:hover{text-decoration:underline}
 
 /* Progress bar - BIGGER */
-.progress-cell{display:flex;align-items:center;gap:8px}
-.progress-track{flex:1;height:24px;background:#21262d;border-radius:6px;overflow:hidden;position:relative}
-.progress-fill{height:100%;background:linear-gradient(90deg,#238636,#3fb950);border-radius:6px;transition:width 0.5s}
-.progress-pct{font-size:12px;font-weight:600;min-width:38px;text-align:right}
+.progress-cell{display:flex;align-items:center;gap:12px}
+.progress-track{flex:1;height:28px;background:#21262d;border-radius:8px;overflow:hidden;min-width:100px}
+.progress-fill{height:100%;background:linear-gradient(90deg,#238636,#3fb950);border-radius:8px;transition:width 0.5s}
+.progress-pct{font-size:12px;font-weight:600;min-width:42px;text-align:right;white-space:nowrap}
 .progress-pct.done{color:#3fb950}
 .progress-pct.low{color:#8b949e}
 
