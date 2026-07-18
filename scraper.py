@@ -25,6 +25,7 @@ log = logging.getLogger("fwn.scrape")
 
 DB_PATH = os.environ.get("DB_PATH", "/app/data/novels.db")
 DELAY_BETWEEN_REQUESTS = float(os.environ.get("DELAY_BETWEEN_REQUESTS", "5"))
+DELAY_PAGE_LIST = float(os.environ.get("DELAY_PAGE_LIST", "0.5"))
 BASE = "https://freewebnovel.com"
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 
@@ -273,7 +274,7 @@ async def scrape_novel(novel_url):
             log.info("  Fetching chapter page %d/%d...", page, meta["total_pages"])
             api_html = await fetch(api_url)
             if page < meta["total_pages"]:
-                await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
+                await asyncio.sleep(DELAY_PAGE_LIST)
             if api_html:
                 try:
                     data = json.loads(api_html)
@@ -351,10 +352,14 @@ async def scrape_novel_concurrent(novel_url):
 
 
 async def scrape_all_concurrent(urls, max_concurrent):
-    """Scrape multiple novels concurrently with a semaphore to limit parallelism."""
+    """Scrape multiple novels concurrently with a semaphore to limit parallelism.
+    Waits DELAY_BETWEEN_REQUESTS between novels to avoid rate limits."""
     semaphore = asyncio.Semaphore(max_concurrent)
 
-    async def _limited(url):
+    async def _limited(url, idx):
+        # Wait before each novel to prevent burst
+        if idx > 0:
+            await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
         async with semaphore:
             log.info("=== Scraping: %s ===", url)
             ok, msg = await scrape_novel_concurrent(url)
@@ -364,6 +369,6 @@ async def scrape_all_concurrent(urls, max_concurrent):
                 log.warning("  Failed: %s", msg)
             return (url, ok, msg)
 
-    tasks = [_limited(url) for url in urls]
+    tasks = [_limited(url, i) for i, url in enumerate(urls)]
     results = await asyncio.gather(*tasks)
     return list(results)
