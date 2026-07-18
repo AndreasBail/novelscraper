@@ -65,7 +65,7 @@ td a:hover{text-decoration:underline}
 .add-status{font-size:12px;margin-top:8px;min-height:16px}
 
 /* Modal */
-#modal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:100;justify-content:center;align-items:center}
+#modal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:9999;justify-content:center;align-items:center}
 #modal.show{display:flex}
 #modal .modal-inner{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:24px;width:100%;max-width:420px}
 #modal .modal-title{color:#f0f6fc;margin-bottom:16px;font-size:16px}
