@@ -34,26 +34,22 @@ if STATIC_DIR.exists():
 @app.get("/api/status")
 def api_status():
     db = _get_db()
-    # Single query: join novels with chapter aggregates
-    rows = db.execute("""SELECT
-            n.url, n.title, n.author, n.chapter_count,
-            n.last_scraped,
-            COUNT(ch.chapter_url) AS total_ch,
-            COUNT(CASE WHEN ch.content != '' THEN 1 END) AS with_content,
-            (SELECT c2.chapter_title FROM chapters c2
-             WHERE c2.novel_url = n.url AND c2.content != ''
-             ORDER BY c2.scraped_at DESC LIMIT 1) AS latest
-        FROM novels n
-        LEFT JOIN chapters ch ON ch.novel_url = n.url
-        GROUP BY n.url
-        ORDER BY n.title""").fetchall()
-    total_chaps = 0
-    chaps_with = 0
+    novel_rows = db.execute("SELECT url,title,author,chapter_count,last_scraped FROM novels").fetchall()
+    total_chaps = db.execute("SELECT COUNT(*) FROM chapters").fetchone()[0]
+    chaps_with = db.execute("SELECT COUNT(*) FROM chapters WHERE length(content) > 0").fetchone()[0]
     novels_out = []
-    for r in rows:
-        n_url, n_title, n_author, n_count, n_last, total_ch, wc, latest = r
-        total_chaps += total_ch
-        chaps_with += wc
+    for r in novel_rows:
+        n_url, n_title, n_author, n_count, n_last = r
+        wc = 0
+        latest = ""
+        if n_count:
+            wc = db.execute(
+                "SELECT COUNT(*) FROM chapters WHERE length(content) > 0 AND novel_url=?",
+                (n_url,)).fetchone()[0]
+            lt = db.execute(
+                "SELECT chapter_title FROM chapters WHERE novel_url=? ORDER BY scraped_at DESC LIMIT 1",
+                (n_url,)).fetchone()
+            latest = lt[0][:30] if lt else ""
         pct = round(wc / n_count * 100) if n_count else 0
         last_str = ""
         if n_last:
@@ -61,8 +57,8 @@ def api_status():
         novels_out.append({
             "url": n_url, "title": n_title, "author": n_author,
             "chapter_count": n_count, "status": pct,
-            "chapters_scraped": wc, "latest": (latest or "")[:30],
-            "last_scraped": last_str,
+            "chapters_scraped": wc,
+            "latest": latest, "last_scraped": last_str,
         })
     scraping = {
         "active": bool(_scraping_novel),
@@ -70,7 +66,7 @@ def api_status():
         **_scraping_progress,
     }
     return {
-        "total_novels": len(novels_out),
+        "total_novels": len(novel_rows),
         "total_chapters": total_chaps,
         "chapters_with_content": chaps_with,
         "scraping": scraping,
