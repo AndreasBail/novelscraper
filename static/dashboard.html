@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html><head><title>FreeWebNovel Scraper</title>
+<link rel="icon" href="/static/favicon.png" type="image/png">
 <link rel="stylesheet" href="/static/dashboard.css"></head><body>
 <div class="header">
   <h1>FreeWebNovel Scraper</h1>
@@ -8,17 +9,11 @@
 <div class="container">
 
   <!-- Stats -->
-  <div class="stats" id="statsBox">
+  <div class="stats">
     <div class="stat-card"><div class="label">Novels</div><div class="value" id="statNovels">-</div></div>
     <div class="stat-card"><div class="label">Chapters</div><div class="value" id="statChapters">-</div></div>
     <div class="stat-card"><div class="label">With Content</div><div class="value green" id="statContent">-</div></div>
     <div class="stat-card"><div class="label">Status</div><div class="value" id="statStatus">-</div></div>
-  </div>
-
-  <!-- Scrape Status Bar (above table) -->
-  <div id="scrapeStatus" class="scrape-info" style="display:none">
-    <div class="text" id="scrapeText"></div>
-    <div class="bar"><div class="fill" id="scrapeFill"></div></div>
   </div>
 
   <!-- Novel Table -->
