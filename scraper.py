@@ -346,29 +346,19 @@ async def _scrape_chapter(ch_info, ref_url):
     return 1
 
 
-async def scrape_novel_concurrent(novel_url):
-    """Scrape a single novel without holding the lock."""
-    return await scrape_novel(novel_url)
-
-
-async def scrape_all_concurrent(urls, max_concurrent):
-    """Scrape multiple novels concurrently with a semaphore to limit parallelism.
-    Waits DELAY_BETWEEN_REQUESTS between novels to avoid rate limits."""
-    semaphore = asyncio.Semaphore(max_concurrent)
-
-    async def _limited(url, idx):
-        # Wait before each novel to prevent burst
-        if idx > 0:
+async def scrape_all_sequential(urls):
+    """Scrape multiple novels sequentially: one at a time, DELAY_BETWEEN_REQUESTS apart."""
+    results = []
+    for i, url in enumerate(urls):
+        log.info("=== Scraping: %s ===", url)
+        ok, msg = await scrape_novel(url)
+        if ok and msg != "Failed to fetch novel page":
+            log.info("  Done: %s", msg)
+        else:
+            log.warning("  Failed: %s", msg)
+        results.append((url, ok, msg))
+        # Wait between novels (not after the last one)
+        if i < len(urls) - 1:
+            log.info("  Waiting %.1fs before next novel...", DELAY_BETWEEN_REQUESTS)
             await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
-        async with semaphore:
-            log.info("=== Scraping: %s ===", url)
-            ok, msg = await scrape_novel_concurrent(url)
-            if ok and msg != "Failed to fetch novel page":
-                log.info("  Done: %s", msg)
-            else:
-                log.warning("  Failed: %s", msg)
-            return (url, ok, msg)
-
-    tasks = [_limited(url, i) for i, url in enumerate(urls)]
-    results = await asyncio.gather(*tasks)
-    return list(results)
+    return results

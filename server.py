@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from scraper import (
     _get_db, _scraping_novel, _scraping_progress,
-    init_db, norm_url, scrape_all_concurrent, scrape_novel,
+    init_db, norm_url, scrape_all_sequential, scrape_novel,
     extract_chapter_num, add_source, remove_source, list_sources,
 )
 from feed import rss_all, rss_single
@@ -97,7 +97,7 @@ async def api_scrape_all():
     db = _get_db()
     db.execute("UPDATE novels SET last_scraped=NULL")
     db.commit()
-    results = await scrape_all_concurrent(urls, max_concurrent=10)
+    results = await scrape_all_sequential(urls)
     failed = [u for u, ok, _ in results if not ok]
     success = [u for u, ok, _ in results if ok]
     if failed:
@@ -265,7 +265,7 @@ def main():
                 while True:
                     try:
                         log.info("Background: scraping %d novels...", len(RUNNING["urls"]))
-                        results = await scrape_all_concurrent(RUNNING["urls"], max_concurrent=10)
+                        results = await scrape_all_sequential(RUNNING["urls"])
                         for url, ok, msg in results:
                             if ok:
                                 log.info("Background: %s -> %s", url, msg)
