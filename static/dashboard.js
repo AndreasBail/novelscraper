@@ -7,31 +7,28 @@ function loadNovels() {
     document.getElementById('statNovels').textContent = d.total_novels;
     document.getElementById('statChapters').textContent = d.total_chapters;
     document.getElementById('statContent').textContent = d.chapters_with_content;
-    _renderStatus(d);
+    var s = d.scraping || {};
+    var statusEl = document.getElementById('statStatus');
+    if(s.active) {
+      statusEl.innerHTML = '<span style="color:#3fb950">Scraping...</span>';  
+    } else {
+      var latest = null;
+      var latestTime = 0;
+      for(var i=0;i<d.novels.length;i++){
+        if(d.novels[i].last_scraped && d.novels[i].last_scraped!=='Never'){
+          var t = d.novels[i].last_scraped;
+          if(t>latestTime){latestTime=t;latest=d.novels[i];}
+        }
+      }
+      if(latest){
+        statusEl.innerHTML='<span style="color:#8b949e;font-size:12px">Idle (updated '+latest.last_scraped+')</span>';
+      } else {
+        statusEl.innerHTML='<span style="color:#8b949e;font-size:12px">Idle</span>';
+      }
+    }
     _novelsData = d.novels || [];
     _renderNovels(_novelsData);
   }).catch(function(){});
-}
-
-function _renderStatus(d) {
-  var el = document.getElementById('scrapeStatus');
-  var textEl = document.getElementById('scrapeText');
-  var fillEl = document.getElementById('scrapeFill');
-  var statusEl = document.getElementById('statStatus');
-  var s = d.scraping || {};
-
-  if (s.active) {
-    el.style.display = 'block';
-    fillEl.style.width = (s.percent || 0) + '%';
-    var msg = (s.message || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    var novel = (s.novel || '').replace(/</g,'&lt;');
-    var total = s.total || 0, scraped = s.scraped || 0;
-    textEl.innerHTML = '<span>Scraping:</span> ' + novel + ' &mdash; ' + msg + ' (' + scraped + '/' + total + ')';
-    statusEl.innerHTML = '<span style="color:#3fb950">ACTIVE</span>';
-  } else {
-    el.style.display = 'none';
-    statusEl.textContent = 'Idle';
-  }
 }
 
 function _renderNovels(novels) {
@@ -50,17 +47,17 @@ function _renderNovels(novels) {
       + '<td><a href="/rss/' + slug + '" target="_blank">' + title + '</a></td>'
       + '<td style="color:#aaa">' + author + '</td>'
       + '<td>' + (n.chapter_count || 0) + '</td>'
-      + '<td><div class="progress-cell"><div class="progress-track"><div class="progress-fill" style="width:' + (n.status || 0) + '%"></div></div><span class="progress-pct ' + (n.status >= 100 ? 'done' : 'low') + '">' + (n.status || 0) + '%</span></div></td>'
+      + '<td><div class="progress-cell"><div class="progress-track"><div class="progress-fill" style="width:' + (n.status || 0) + '%"></div></div><span class="progress-pct ' + (n.status >= 100 ? 'done' : 'low') + '" title="' + n.chapters_scraped + ' of ' + (n.chapter_count || 0) + ' chapters">' + (n.status || 0) + '%</span></div></td>'
       + '<td style="font-size:12px;color:#888">' + (n.latest || '') + '</td>'
       + '<td style="font-size:12px;color:#888">' + (n.last_scraped || 'Never') + '</td>'
       + '<td><div class="actions">'
-        + '<button class="chevron-btn" onclick="toggleMenu(this)" title="Actions">⋮</button>'
+        + '<button class="chevron-btn" onclick="toggleMenu(this)" title="Actions">&#8942;</button>'
         + '<div class="dropdown-menu">'
-          + '<button class="menu-scrape" onclick="scrapeSingle(\'' + n.url.replace(/'/g,"\\'") + '\');closeAllMenus()">▶ Scrape</button>'
-          + '<button class="menu-edit" onclick="openEdit(\'' + slug + '\',\'' + title.replace(/'/g,"\\'") + '\',\'' + author.replace(/'/g,"\\'") + '\',\'' + n.url.replace(/'/g,"\\'") + '\');closeAllMenus()">✎ Edit</button>'
-          + '<button class="menu-delete" onclick="deleteNovel(\'' + slug + '\',\'' + title.replace(/'/g,"\\'") + '\');closeAllMenus()">✕ Delete</button>'
+          + '<button class="menu-scrape" data-idx="' + str(i) + '" onclick="handleMenuClick(this,\'scrape\')">&#9654; Scrape</button>'
+          + '<button class="menu-edit" data-idx="' + str(i) + '" onclick="handleMenuClick(this,\'edit\')">&#10098; Edit</button>'
+          + '<button class="menu-delete" data-idx="' + str(i) + '" onclick="handleMenuClick(this,\'delete\')">&#10005; Delete</button>'
         + '</div>'
-      + '</div></td>'
+    + '</div></td>'
     + '</tr>';
   }
   body.innerHTML = html;
@@ -71,16 +68,6 @@ function htmlEscape(s) {
   var div = document.createElement('div');
   div.appendChild(document.createTextNode(s));
   return div.innerHTML;
-}
-
-function updateScrapeStatus() {
-  api().then(function(r){return r.json();}).then(function(d){
-    _renderStatus(d);
-    if (!d.scraping || !d.scraping.active) {
-      _novelsData = d.novels || [];
-      _renderNovels(_novelsData);
-    }
-  }).catch(function(){});
 }
 
 function deleteNovel(slug, title) {
@@ -152,13 +139,17 @@ function closeModal() {
   document.getElementById('modal').className = '';
 }
 
-document.addEventListener('keydown', function(e){
-  if(e.key==='Escape') { closeModal(); closeAllMenus(); }
-});
-
-document.addEventListener('click', function(e){
-  if(!e.target.closest('.actions')) closeAllMenus();
-});
+function handleMenuClick(btn, action) {
+  var idx = parseInt(btn.dataset.idx);
+  var n = _novelsData[idx];
+  if(!n) return;
+  var title = htmlEscape(n.title);
+  var slug = n.url.replace(/.*\/novel\//,'').replace(/\/$/,'');
+  closeAllMenus();
+  if(action === 'scrape') scrapeSingle(n.url);
+  else if(action === 'edit') openEdit(slug, title, htmlEscape(n.author), n.url);
+  else if(action === 'delete') deleteNovel(slug, title);
+}
 
 function toggleMenu(btn) {
   var menu = btn.nextElementSibling;
@@ -172,7 +163,14 @@ function closeAllMenus() {
   document.querySelectorAll('.chevron-btn.open').forEach(function(b){ b.classList.remove('open'); });
 }
 
+document.addEventListener('keydown', function(e){
+  if(e.key==='Escape') { closeModal(); closeAllMenus(); }
+});
+
+document.addEventListener('click', function(e){
+  if(!e.target.closest('.actions')) closeAllMenus();
+});
+
 document.addEventListener('DOMContentLoaded', function() {
   loadNovels();
-  setInterval(updateScrapeStatus, 3000);
 });

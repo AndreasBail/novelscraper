@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import PlainTextResponse, FileResponse
+from fastapi.responses import PlainTextResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from scraper import (
@@ -57,13 +57,19 @@ def api_status():
         novels_out.append({
             "url": n_url, "title": n_title, "author": n_author,
             "chapter_count": n_count, "status": pct,
+            "chapters_scraped": wc,
             "latest": latest, "last_scraped": last_str,
         })
+    scraping = {
+        "active": bool(_scraping_novel),
+        "novel": _scraping_novel or "",
+        **_scraping_progress,
+    }
     return {
         "total_novels": len(novel_rows),
         "total_chapters": total_chaps,
         "chapters_with_content": chaps_with,
-        "scraping": {"active": bool(_scraping_novel), "novel": _scraping_novel or "", **_scraping_progress},
+        "scraping": scraping,
         "novels": novels_out,
     }
 
@@ -230,6 +236,12 @@ async def rss_all_feed():
 
 
 # ── Dashboard (served from static files) ──
+
+@app.get("/")
+def root_redirect():
+    """Redirect root URL to the dashboard."""
+    return RedirectResponse(url="/progress")
+
 
 @app.get("/progress")
 def dashboard_page():
