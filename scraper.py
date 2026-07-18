@@ -24,10 +24,11 @@ logging.basicConfig(
 log = logging.getLogger("fwn.scrape")
 
 DB_PATH = os.environ.get("DB_PATH", "/app/data/novels.db")
-DELAY_BETWEEN_REQUESTS = float(os.environ.get("DELAY_BETWEEN_REQUESTS", "180"))
+DELAY_BETWEEN_REQUESTS = float(os.environ.get("DELAY_BETWEEN_REQUESTS", "5"))
 BASE = "https://freewebnovel.com"
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 
+SCRAPE_BATCH_SIZE = int(os.environ.get("SCRAPE_BATCH_SIZE", "10"))
 _scraping_lock = threading.Lock()
 _scraping_novel = None
 _scraping_progress = {"message": "", "percent": 0, "total": 0, "scraped": 0}
@@ -244,6 +245,9 @@ async def scrape_novel(novel_url):
     _scraping_novel = os.path.basename(novel_url.rstrip("/"))
     _scraping_progress = {
         "message": "Fetching novel metadata...", "percent": 0, "total": 0, "scraped": 0}
+    # Note: no lock held during scrape — multiple concurrent scrapes may
+    # clobber _scraping_novel/_scraping_progress, but the dashboard only
+    # shows a count, so that's fine.
     ref_url = novel_url
 
     # Fetch novel metadata page
@@ -297,14 +301,16 @@ async def scrape_novel(novel_url):
 
     if new_chaps:
         log.info("  %d new chapters to scrape content for", len(new_chaps))
-        for i in range(len(new_chaps)):
-            task = _scrape_chapter(new_chaps[i], ref_url)
-            result = await task
-            _scraping_progress["scraped"] += result
-            _scraping_progress["message"] = f"Chapter {i+1}/{len(new_chaps)}: {result} saved"
-            _scraping_progress["percent"] = 10 + int(80 * (i + 1) / len(new_chaps))
-            log.info("  %d/%d: %s", i+1, len(new_chaps), "saved" if result else "skipped")
-            if i + 1 < len(new_chaps):
+        for i in range(0, len(new_chaps), SCRAPE_BATCH_SIZE):
+            batch = new_chaps[i:i + SCRAPE_BATCH_SIZE]
+            tasks = [_scrape_chapter(c, ref_url) for c in batch]
+            results = await asyncio.gather(*tasks)
+            scraped = sum(results)
+            _scraping_progress["scraped"] += scraped
+            _scraping_progress["message"] = f"Batch {i//SCRAPE_BATCH_SIZE + 1}: {scraped}/{len(batch)} saved"
+            _scraping_progress["percent"] = 10 + int(80 * (i + len(batch)) / len(new_chaps))
+            log.info("  %d-%d/%d: scraped %d", i, i + len(batch), len(new_chaps), scraped)
+            if i + SCRAPE_BATCH_SIZE < len(new_chaps):
                 await asyncio.sleep(DELAY_BETWEEN_REQUESTS)
 
     # Mark complete
@@ -339,21 +345,25 @@ async def _scrape_chapter(ch_info, ref_url):
     return 1
 
 
-async def scrape_novel_serial(novel_url):
-    """Scrape with serialization: holds _scraping_lock to prevent concurrent scrapes."""
-    with _scraping_lock:
-        return await scrape_novel(novel_url)
+async def scrape_novel_concurrent(novel_url):
+    """Scrape a single novel without holding the lock."""
+    return await scrape_novel(novel_url)
 
 
-async def scrape_all_novels_serial(urls):
-    """Scrape multiple novels sequentially, one at a time."""
-    results = []
-    for url in urls:
-        log.info("=== Scraping: %s ===", url)
-        ok, msg = await scrape_novel_serial(url)
-        results.append((url, ok, msg))
-        if ok and msg != "Failed to fetch novel page":
-            log.info("  Done: %s", msg)
-        else:
-            log.warning("  Failed: %s", msg)
-    return results
+async def scrape_all_concurrent(urls, max_concurrent):
+    """Scrape multiple novels concurrently with a semaphore to limit parallelism."""
+    semaphore = asyncio.Semaphore(max_concurrent)
+
+    async def _limited(url):
+        async with semaphore:
+            log.info("=== Scraping: %s ===", url)
+            ok, msg = await scrape_novel_concurrent(url)
+            if ok and msg != "Failed to fetch novel page":
+                log.info("  Done: %s", msg)
+            else:
+                log.warning("  Failed: %s", msg)
+            return (url, ok, msg)
+
+    tasks = [_limited(url) for url in urls]
+    results = await asyncio.gather(*tasks)
+    return list(results)

@@ -10,8 +10,8 @@ from fastapi.responses import PlainTextResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from scraper import (
-    _get_db, _scraping_lock, _scraping_novel, _scraping_progress,
-    init_db, norm_url, scrape_all_novels_serial, scrape_novel,
+    _get_db, _scraping_novel, _scraping_progress,
+    init_db, norm_url, scrape_all_concurrent, scrape_novel,
     extract_chapter_num, add_source, remove_source, list_sources,
 )
 from feed import rss_all, rss_single
@@ -82,10 +82,7 @@ def api_status():
 @app.post("/api/scrape/{path:path}")
 async def api_scrape(path):
     url = path if path.startswith("http") else norm_url(f"https://freewebnovel.com/novel/{path}")
-    with _scraping_lock:
-        if _scraping_novel:
-            raise HTTPException(409, f"Already scraping: {_scraping_novel}")
-        ok, msg = await scrape_novel(url)
+    ok, msg = await scrape_novel(url)
     return {"ok": ok, "message": msg}
 
 @app.get("/api/scrape/{path:path}/progress")
@@ -94,21 +91,18 @@ def api_scrape_progress(path):
 
 @app.post("/api/scrape-all")
 async def api_scrape_all():
-    with _scraping_lock:
-        if _scraping_novel:
-            raise HTTPException(409, f"Already scraping: {_scraping_novel}")
-        urls = list_sources()
-        if not urls:
-            raise HTTPException(404, "No sources in database")
-        db = _get_db()
-        db.execute("UPDATE novels SET last_scraped=NULL")
-        db.commit()
-        results = await scrape_all_novels_serial(urls)
-        failed = [u for u, ok, _ in results if not ok]
-        success = [u for u, ok, _ in results if ok]
-        if failed:
-            log.warning("Scrape all completed with %d failures: %s", len(failed), failed)
-        return {"ok": True, "message": f"Scraped {len(success)}/{len(urls)} novels", "failed": failed}
+    urls = list_sources()
+    if not urls:
+        raise HTTPException(404, "No sources in database")
+    db = _get_db()
+    db.execute("UPDATE novels SET last_scraped=NULL")
+    db.commit()
+    results = await scrape_all_concurrent(urls, max_concurrent=10)
+    failed = [u for u, ok, _ in results if not ok]
+    success = [u for u, ok, _ in results if ok]
+    if failed:
+        log.warning("Scrape all completed with %d failures: %s", len(failed), failed)
+    return {"ok": True, "message": f"Scraped {len(success)}/{len(urls)} novels", "failed": failed}
 
 
 # ── Source management ──
@@ -144,10 +138,7 @@ async def api_add_source(request: Request):
     if db.execute("SELECT 1 FROM sources WHERE url=?", (url,)).fetchone():
         raise HTTPException(409, "Already in sources")
     add_source(url)
-    with _scraping_lock:
-        if _scraping_novel:
-            raise HTTPException(409, f"Already scraping: {_scraping_novel}")
-        ok, msg = await scrape_novel(url)
+    ok, msg = await scrape_novel(url)
     return {"ok": ok, "url": url, "message": msg}
 
 
@@ -272,14 +263,16 @@ def main():
                 run_interval = __import__("os").environ.get("RUN_INTERVAL_HOURS", "6")
                 run_interval = int(run_interval)
                 while True:
-                    for url in RUNNING["urls"]:
-                        try:
-                            log.info("Background: scraping %s", url)
-                            with _scraping_lock:
-                                ok, msg = await scrape_novel(url)
-                            log.info("Background: %s -> %s: %s", url, "OK" if ok else "FAIL", msg)
-                        except Exception:
-                            log.exception("Background scrape error for %s", url)
+                    try:
+                        log.info("Background: scraping %d novels...", len(RUNNING["urls"]))
+                        results = await scrape_all_concurrent(RUNNING["urls"], max_concurrent=10)
+                        for url, ok, msg in results:
+                            if ok:
+                                log.info("Background: %s -> %s", url, msg)
+                            else:
+                                log.warning("Background: %s -> %s", url, msg)
+                    except Exception:
+                        log.exception("Background scrape error")
                     log.info("Waiting %d hours until next run...", run_interval)
                     await _asyncio.sleep(run_interval * 3600)
 
