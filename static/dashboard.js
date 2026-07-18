@@ -155,7 +155,19 @@ function toggleMenu(btn) {
   var menu = btn.nextElementSibling;
   var wasOpen = menu.classList.contains('show');
   closeAllMenus();
-  if(!wasOpen) { menu.classList.add('show'); btn.classList.add('open'); }
+  if(!wasOpen) {
+    menu.classList.add('show');
+    btn.classList.add('open');
+    // Flip to open upward if menu would be cut off at bottom of viewport
+    var rect = menu.getBoundingClientRect();
+    if(rect.bottom > window.innerHeight) {
+      menu.style.top = 'auto';
+      menu.style.bottom = '100%';
+    } else {
+      menu.style.top = '100%';
+      menu.style.bottom = 'auto';
+    }
+  }
 }
 
 function closeAllMenus() {
